@@ -42,6 +42,7 @@ class MyDroneLidar(DroneAbstract):
                    "lateral": 0.0,
                    "rotation": 0.0,
                    "grasper": 0}
+        print(self.lidar_values())
         return command
 
 

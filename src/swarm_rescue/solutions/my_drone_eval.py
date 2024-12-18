@@ -1,5 +1,5 @@
-from solutions.my_drone_random import MyDroneRandom
+from solutions.semantic_sensor_new import MyDroneSemantic
 
 
-class MyDroneEval(MyDroneRandom):
+class MyDroneEval(MyDroneSemantic):
     pass
