@@ -7,6 +7,7 @@ import math
 import sys
 from pathlib import Path
 from enum import Enum
+import cv2
 from typing import List, Type
 
 
@@ -17,74 +18,114 @@ from typing import List, Type
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from maps.map_intermediate_01 import MyMapIntermediate01
 
+from spg_overlay.utils.constants import MAX_RANGE_LIDAR_SENSOR
 from spg_overlay.entities.drone_abstract import DroneAbstract
 from spg_overlay.entities.drone_distance_sensors import DroneSemanticSensor
-from spg_overlay.gui_map.gui_sr import GuiSR
-from spg_overlay.utils.misc_data import MiscData
+from spg_overlay.utils.pose import Pose
+from spg_overlay.utils.grid import Grid
 
 
-from spg_overlay.entities.rescue_center import RescueCenter
-from spg_overlay.entities.wounded_person import WoundedPerson
-from spg_overlay.gui_map.closed_playground import ClosedPlayground
-from spg_overlay.gui_map.map_abstract import MapAbstract
+class OccupancyGrid(Grid):
+    """Enhanced occupancy grid for exploration."""
 
-class MyMapTraining(MapAbstract):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, size_area_world, resolution: float, lidar):
+        super().__init__(size_area_world=size_area_world, resolution=resolution)
 
-        self._size_area = (800, 800)
-        self._rescue_center = RescueCenter(size=(100, 100))
-        self._rescue_center_pos = ((0, 150), 0)
+        self.size_area_world = size_area_world
+        self.resolution = resolution
 
-        # Wounded persons setup
-        self._number_wounded_persons = 2
-        self._wounded_persons_pos = []
-        self._wounded_persons = []
+        self.lidar = lidar
 
-        for i in range(self._number_wounded_persons):
-            x = random.uniform(-150, 150)
-            y = random.uniform(-150, 150)
-            pos = ((x, y), random.uniform(-math.pi, math.pi))
-            self._wounded_persons_pos.append(pos)
+        self.x_max_grid: int = int(self.size_area_world[0] / self.resolution + 0.5)
+        self.y_max_grid: int = int(self.size_area_world[1] / self.resolution + 0.5)
 
-        # Drone positions
-        self._number_drones = 1
-        self._drones_pos = [((-100, -100), random.uniform(-math.pi, math.pi))]
-        self._drones: List[DroneAbstract] = []
+        self.initial_cell = None
 
-    def construct_playground(self, drone_type):
-        # Create a new playground
-        playground = ClosedPlayground(size=self._size_area)
+        # Initialize grid with low values (unexplored regions)
+        self.grid = np.full((self.x_max_grid, self.y_max_grid), -5.0)  # Start with low probability
+        self.zoomed_grid = np.empty((self.x_max_grid, self.y_max_grid))
 
-        # Add a fresh instance of the rescue center
-        self._rescue_center = RescueCenter(size=(100, 100))
-        playground.add(self._rescue_center, self._rescue_center_pos)
+    def set_initial_cell(self, world_x, world_y):
+        """Store the cell that corresponds to the initial drone position."""
+        cell_x, cell_y = self._conv_world_to_grid(world_x, world_y)
+        if 0 <= cell_x < self.x_max_grid and 0 <= cell_y < self.y_max_grid:
+            self.initial_cell = (cell_x, cell_y)
 
-        # Add wounded persons (reinitialize the list)
-        self._wounded_persons = []
-        for pos in self._wounded_persons_pos:
-            wounded_person = WoundedPerson(rescue_center=self._rescue_center)
-            self._wounded_persons.append(wounded_person)
-            playground.add(wounded_person, pos)
+    def to_binary_map(self):
+        """
+        Convert the probabilistic occupancy grid into a binary grid.
+        1 = obstacle
+        0 = free
+        """
+        binary_map = np.zeros_like(self.grid, dtype=int)
+        binary_map[self.grid >= 0] = 1
+        return binary_map
 
-        # Add drones (reinitialize the list)
-        self._drones = []
-        misc_data = MiscData(size_area=self._size_area,
-                             number_drones=self._number_drones,
-                             max_timestep_limit=self._max_timestep_limit,
-                             max_walltime_limit=self._max_walltime_limit)
-        for i, pos in enumerate(self._drones_pos):
-            drone = drone_type(identifier=i, misc_data=misc_data)
-            self._drones.append(drone)
-            playground.add(drone, pos)
+    def update_grid(self, pose: Pose):
+        """
+        Bayesian map update with new observation
+        """
+        EVERY_N = 3
+        LIDAR_DIST_CLIP = 40.0
+        EMPTY_ZONE_VALUE = -0.6
+        OBSTACLE_ZONE_VALUE = 2.0
+        FREE_ZONE_VALUE = -4.0
 
-        return playground
+        lidar_dist = self.lidar.get_sensor_values()[::EVERY_N].copy()
+        lidar_angles = self.lidar.ray_angles[::EVERY_N].copy()
 
-    def get_drones(self):
-        return self._drones
+        cos_rays = np.cos(lidar_angles + pose.orientation)
+        sin_rays = np.sin(lidar_angles + pose.orientation)
 
-    def get_number_drones(self):
-        return self._number_drones
+        max_range = MAX_RANGE_LIDAR_SENSOR * 0.9
+
+        # For empty zones
+        lidar_dist_empty = np.maximum(lidar_dist - LIDAR_DIST_CLIP, 0.0)
+        lidar_dist_empty_clip = np.minimum(lidar_dist_empty, max_range)
+        points_x = pose.position[0] + np.multiply(lidar_dist_empty_clip, cos_rays)
+        points_y = pose.position[1] + np.multiply(lidar_dist_empty_clip, sin_rays)
+
+        for pt_x, pt_y in zip(points_x, points_y):
+            self.add_value_along_line(pose.position[0], pose.position[1], pt_x, pt_y, EMPTY_ZONE_VALUE)
+
+        # For obstacle zones
+        select_collision = lidar_dist < max_range
+        points_x = pose.position[0] + np.multiply(lidar_dist, cos_rays)
+        points_y = pose.position[1] + np.multiply(lidar_dist, sin_rays)
+        points_x = points_x[select_collision]
+        points_y = points_y[select_collision]
+        self.add_points(points_x, points_y, OBSTACLE_ZONE_VALUE)
+
+        # Mark the current position as free
+        self.add_points(pose.position[0], pose.position[1], FREE_ZONE_VALUE)
+
+        # Clip values
+        self.grid = np.clip(self.grid, -10, 10)
+
+        # Update zoomed grid for visualization
+        self.zoomed_grid = cv2.resize(self.grid, (self.x_max_grid // 2, self.y_max_grid // 2), interpolation=cv2.INTER_NEAREST)
+
+    def is_unexplored(self, world_x, world_y):
+        """
+        Check if the given world position corresponds to an unexplored grid cell.
+        """
+        cell_x, cell_y = self._conv_world_to_grid(world_x, world_y)
+        if 0 <= cell_x < self.x_max_grid and 0 <= cell_y < self.y_max_grid:
+            return self.grid[cell_x, cell_y] < 0  # Negative values indicate unexplored areas
+        return False
+
+    def compute_exploration_reward(self, pose: Pose):
+        """
+        Compute a reward based on exploration of unexplored areas.
+        """
+        cell_x, cell_y = self._conv_world_to_grid(*pose.position)
+        if 0 <= cell_x < self.x_max_grid and 0 <= cell_y < self.y_max_grid:
+            value = self.grid[cell_x, cell_y]
+            if value < 0:  # Reward exploration of unexplored areas
+                self.grid[cell_x, cell_y] += 1  # Mark as explored
+                return 10  # Exploration reward
+        return -1  # Penalize revisiting explored areas
+
 
 
 # Hyperparameters
@@ -100,9 +141,9 @@ class PolicyNetwork(nn.Module):
     def __init__(self, state_dim, action_dim=4):
         super(PolicyNetwork, self).__init__()
         self.fc = nn.Sequential(
-            nn.Linear(state_dim, 128),
+            nn.Linear(state_dim, 64),
             nn.ReLU(),
-            nn.Linear(128, action_dim)
+            nn.Linear(64, action_dim)
         )
         self.to(device)
 
@@ -117,9 +158,9 @@ class ValueNetwork(nn.Module):
     def __init__(self, state_dim):
         super(ValueNetwork, self).__init__()
         self.fc = nn.Sequential(
-            nn.Linear(state_dim, 128),
+            nn.Linear(state_dim, 64),
             nn.ReLU(),
-            nn.Linear(128, 1)
+            nn.Linear(64, 1)
         )
         self.to(device)
 
@@ -141,6 +182,11 @@ class MyDrone(DroneAbstract):
         super().__init__(**kwargs)
         self.policy_net = policy_net
         self.state = self.Activity.SEARCHING_WOUNDED
+        resolution = 8
+        self.grid = OccupancyGrid(size_area_world=self.size_area,
+                                  resolution=resolution,
+                                  lidar=self.lidar())
+        self.pose = Pose()
 
 
     def control(self):
@@ -240,39 +286,36 @@ def find_largest_opening(lidar_values):
     return sector_angle, max_distance
 
 
-def compute_reward(is_collision, is_rescue, near_wounded, lidar_data, current_angle, time_penalty):
-    """
-    Compute reward based on multiple factors:
-    1. Avoid collisions.
-    2. Encourage reaching the rescue area.
-    3. Incentivize moving toward the largest LiDAR opening.
-    4. Penalize time spent idling.
-    """
+def compute_reward(is_collision, lidar_data, occupancy_grid, pose, time_penalty):
     reward = 0
 
     # Penalize collisions
     if is_collision:
-        reward -= 50
+        reward -= 1000
 
-    # Reward for successfully rescuing and reaching the rescue area
-    if is_rescue and near_wounded:
-        reward += 50
+    # Reward exploration
+    exploration_reward = occupancy_grid.compute_exploration_reward(pose)
+    reward += exploration_reward
 
     # Reward movement toward the largest opening
     largest_opening_angle, _ = find_largest_opening(lidar_data)
-    angular_difference = abs(largest_opening_angle - current_angle)
-    angular_difference = min(angular_difference, 2 * np.pi - angular_difference)  # Ensure smallest angular difference
-    reward += 5 * (1 - angular_difference / np.pi)  # Scale reward: closer to the opening direction gets higher reward
+    angular_difference = abs(largest_opening_angle - pose.orientation)
+    angular_difference = min(angular_difference, 2 * np.pi - angular_difference)
+    reward += 5 * (1 - angular_difference / np.pi)
 
-    # Penalize idling or spending too much time
+    if min(lidar_data)*300<40:
+        reward -= 100
+
+    # Penalize idling
     reward -= time_penalty
 
     return reward
 
 
 
-def compute_returns(rewards,returned):
-    returns = [returned+rewards[-1]]
+
+def compute_returns(rewards,found):
+    returns = [1000 if found else 0+rewards[-1]]
     g = 0
     for reward in reversed(rewards[:-1]):
         g = reward + GAMMA * g
@@ -348,6 +391,9 @@ def train():
 
     for episode in range(NB_EPISODES):
         playground = base_playground
+        for drone in map_training.drones:
+            drone.occupancy_grid = OccupancyGrid(size_area_world=drone.size_area, resolution=10.0, lidar=drone.lidar())
+            #drone.occupancy_grid.set_initial_cell(drone.measured_gps_position()[0], drone.measured_gps_position()[1])
         # gui = GuiSR(playground=playground, the_map=map_training, draw_semantic_rays=True)
         done = False
         states, actions, rewards = [], [], []
@@ -355,7 +401,7 @@ def train():
         step = 0
         nb_rescue = 0
 
-        while step < MAX_STEPS:
+        while not done and step < MAX_STEPS:
             step += 1
             playground.step()
             # gui.run()  # Run GUI for visualization
@@ -366,13 +412,13 @@ def train():
                 state = np.concatenate([lidar_data, semantic_data])
                 action, _ = select_action(drone.policy_net, state)
                 current_angle = drone.measured_compass_angle()
+                drone.occupancy_grid.update_grid(drone.pose)
                 reward = compute_reward(
-                    is_collision=min(drone.lidar_values()) < 40,
-                    is_rescue=action[3],
-                    near_wounded=lidar_data[0]*300<40,
+                    is_collision=min(drone.lidar_values()) < 20,
                     lidar_data=lidar_data,
-                    current_angle=current_angle,
-                    time_penalty=0.1
+                    occupancy_grid=drone.occupancy_grid,
+                    pose=drone.pose,
+                    time_penalty=1
                 )
                 states.append(state)
                 actions.append(action)
@@ -380,10 +426,10 @@ def train():
                 total_reward += reward
                 nb_rescue += int(drone.is_inside_return_area)
 
-            done = nb_rescue == map_training.number_drones
+                done = lidar_data[0]*300<40
 
         # Optimize the policy and value networks in batches
-        returns = compute_returns(rewards, map_training.compute_score_health_returned())
+        returns = compute_returns(rewards, done)
         optimize_batch(states, actions, returns, batch_size=64)
         rewards_per_episode.append(total_reward)
 
@@ -391,6 +437,8 @@ def train():
             print(f"Episode {episode}, Reward: {total_reward}, Mean Last 100 Rewards: {np.mean(rewards_per_episode[-100:])}")
             torch.save(policy_net.state_dict(), 'policy_net.pth')
             torch.save(value_net.state_dict(), 'value_net.pth')
+            #cv2.imshow("Occupancy Grid", map_training.drones[0].occupancy_grid.zoomed_grid)
+            #cv2.waitKey(1)
 
         if np.mean(rewards_per_episode[-100:]) > 10000:
             print(f"Training solved in {episode} episodes!")

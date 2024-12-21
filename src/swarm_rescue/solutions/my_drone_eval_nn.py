@@ -25,9 +25,9 @@ class PolicyNetwork(nn.Module):
     def __init__(self, state_dim, action_dim=4):
         super(PolicyNetwork, self).__init__()
         self.fc = nn.Sequential(
-            nn.Linear(state_dim, 128),
+            nn.Linear(state_dim, 64),
             nn.ReLU(),
-            nn.Linear(128, action_dim)
+            nn.Linear(64, action_dim)
         )
         self.to(device)
 

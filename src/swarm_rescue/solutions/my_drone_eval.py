@@ -1,5 +1,5 @@
-from solutions.semantic_sensor_new import MyDroneSemantic
+from solutions.my_drone_following_path import MyDroneFollowingPath
 
 
-class MyDroneEval(MyDroneSemantic):
+class MyDroneEval(MyDroneFollowingPath):
     pass
