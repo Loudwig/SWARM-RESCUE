@@ -20,7 +20,7 @@ from maps.map_final_2022_23 import MyMapFinal2022_23
 from maps.map_medium_01 import MyMapMedium01
 from maps.map_medium_02 import MyMapMedium02
 
-from solutions.my_drone_eval import MyDroneEval
+from solutions.my_drone_eval_nn import MyDroneEval
 
 
 class MyDrone(MyDroneEval):

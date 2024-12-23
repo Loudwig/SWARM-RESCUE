@@ -5,6 +5,7 @@ import sys
 import os
 from pathlib import Path
 from enum import Enum
+import math
 
 
 
@@ -27,15 +28,16 @@ class PolicyNetwork(nn.Module):
         self.fc = nn.Sequential(
             nn.Linear(state_dim, 64),
             nn.ReLU(),
-            nn.Linear(64, action_dim)
+            nn.Linear(64, action_dim + 3)  # 3 continuous means + 3 log_stds + 1 discrete logits
         )
         self.to(device)
 
     def forward(self, x):
         logits = self.fc(x)
-        continuous_actions = torch.tanh(logits[:, :3])*1.0  # Continuous actions
-        discrete_action = torch.sigmoid(logits[:, 3])  # Grasp action
-        return continuous_actions, discrete_action
+        means = torch.tanh(logits[:, :3])  # Means for continuous actions (bounded in [-1, 1])
+        log_stds = torch.clamp(logits[:, 3:6], -20, 2)  # Log stds for continuous actions
+        discrete_logits = logits[:, 6:]  # Logits for discrete action
+        return means, log_stds, discrete_logits
 
 
 
@@ -62,7 +64,6 @@ class MyDroneEval(DroneAbstract):
         state = np.concatenate([lidar_data, semantic_data])
         action, _ = select_action(self.policy_net, state)
         return process_actions(action)
-
 
     def define_message_for_all(self):
         """
@@ -119,16 +120,30 @@ def process_actions(actions):
     }
 
 
-def select_action(policy_net, state):
+def select_action(policy, state):
     state = torch.FloatTensor(state).to(device).unsqueeze(0)
-    continuous_actions, discrete_action_prob = policy_net(state)
+    means, log_stds, discrete_logits = policy(state)
 
-    # Clipping for numerical stability
-    discrete_action_prob = torch.clamp(discrete_action_prob, 1e-6, 1 - 1e-6)
+    # Sample continuous actions
+    stds = torch.exp(log_stds)
+    sampled_continuous_actions = means + torch.randn_like(means) * stds
 
-    continuous_actions = continuous_actions[0].cpu().detach().numpy()
-    discrete_action = int(discrete_action_prob[0].item() > 0.5)  # Threshold 0.5
-    action = np.concatenate([continuous_actions, [discrete_action]])
+    # Clamp continuous actions to valid range
+    continuous_actions = torch.clamp(sampled_continuous_actions, -1.0, 1.0)
 
-    log_prob = torch.log(discrete_action_prob if discrete_action == 1 else 1 - discrete_action_prob)
-    return action, log_prob
+    # Compute log probabilities for continuous actions
+    log_probs_continuous = -0.5 * (((sampled_continuous_actions - means) / (stds + 1e-8)) ** 2 + 2 * log_stds + math.log(2 * math.pi))
+    log_probs_continuous = log_probs_continuous.sum(dim=1)
+
+    # Compute discrete action probability
+    discrete_action_prob = torch.sigmoid(discrete_logits).squeeze()
+    discrete_action = int(discrete_action_prob.item() > 0.5)
+
+    # Log probability for discrete action
+    log_prob_discrete = torch.log(discrete_action_prob + 1e-8) if discrete_action == 1 else torch.log(1 - discrete_action_prob + 1e-8)
+
+    # Combine actions
+    action = torch.cat([continuous_actions, torch.tensor([[discrete_action]], device=device)], dim=1).squeeze()
+    log_prob = log_probs_continuous + log_prob_discrete
+    return action.detach().cpu().numpy(), log_prob
+
