@@ -8,29 +8,26 @@ import sys
 from pathlib import Path
 from enum import Enum
 import matplotlib.pyplot as plt
+import gc
 from typing import List, Type
 
-
-
 # Insert the parent directory of the current file's directory into sys.path.
-# This allows Python to locate modules that are one level above the current
-# script, in this case spg_overlay.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from maps.map_intermediate_01 import MyMapIntermediate01
-
 from spg_overlay.utils.constants import MAX_RANGE_LIDAR_SENSOR
 from spg_overlay.entities.drone_abstract import DroneAbstract
 from spg_overlay.entities.drone_distance_sensors import DroneSemanticSensor
 from spg_overlay.utils.pose import Pose
 from spg_overlay.utils.grid import Grid
 
-
 # Hyperparameters
 GAMMA = 0.99
 LEARNING_RATE = 1e-4
-ENTROPY_BETA = 0.1
-NB_EPISODES = 1200
-MAX_STEPS = 100
+ENTROPY_BETA = 0.01
+EPSILON_CLIP = 0.2
+LAM = 0.95
+NB_EPISODES = 400
+MAX_STEPS = 200
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 class OccupancyGrid(Grid):
@@ -47,7 +44,7 @@ class OccupancyGrid(Grid):
         self.y_max_grid: int = int(self.size_area_world[1] / self.resolution + 0.5)
 
         self.grid = np.full((self.x_max_grid, self.y_max_grid), -5.0)
-        self.last_position = None
+        self.last_position = Pose()
         self.visited_zones = set()
 
     def update_grid(self, pose: Pose, step):
@@ -89,8 +86,8 @@ class OccupancyGrid(Grid):
         self.add_points(pose.position[0], pose.position[1], FREE_ZONE_VALUE)
 
         # Clip grid values to avoid runaway updates
-        if step % 50 == 0:
-            self.grid = np.clip(self.grid, -10, 10)
+        #if step % 50 == 0:
+            #self.grid = np.clip(self.grid, -10, 10)
 
     def compute_exploration_reward(self, x, y):
         """
@@ -127,12 +124,11 @@ class OccupancyGrid(Grid):
         """Mark the zone as visited and return if it's a new zone."""
         cell_x, cell_y = self._conv_world_to_grid(world_x, world_y)
         if 0 <= cell_x < self.x_max_grid and 0 <= cell_y < self.y_max_grid:
-            zone = (cell_x//5, cell_y//5)
+            zone = (cell_x//20, cell_y//20)
             if zone not in self.visited_zones:
                 self.visited_zones.add(zone)
                 return True  # New zone
         return False  # Already visited or out of bounds
-
 
 
 class PolicyNetwork(nn.Module):
@@ -141,19 +137,16 @@ class PolicyNetwork(nn.Module):
         self.fc = nn.Sequential(
             nn.Linear(state_dim, 128),
             nn.ReLU(),
-            nn.Linear(128, action_dim + 3)  # 3 continuous means + 3 log_stds + 1 discrete logits
+            nn.Linear(128, action_dim + 3)  # 3 continuous + 3 log_stds + 1 discrete logits
         )
         self.to(device)
 
     def forward(self, x):
         logits = self.fc(x)
-        means = torch.tanh(logits[:, :3])  # Means for continuous actions (bounded in [-1, 1])
-        log_stds = torch.clamp(logits[:, 3:6], -20, 2)  # Log stds for continuous actions
-        discrete_logits = logits[:, 6:]  # Logits for discrete action
+        means = torch.tanh(logits[:, :3])
+        log_stds = torch.clamp(logits[:, 3:6], -20, 2)
+        discrete_logits = logits[:, 6:]
         return means, log_stds, discrete_logits
-
-
-
 
 class ValueNetwork(nn.Module):
     def __init__(self, state_dim):
@@ -188,6 +181,7 @@ class MyDrone(DroneAbstract):
                                   resolution=resolution,
                                   lidar=self.lidar())
         self.pose = Pose()
+        self.init_pose = Pose()
 
 
     def control(self):
@@ -215,9 +209,9 @@ class MyDrone(DroneAbstract):
 
 def preprocess_lidar(lidar_values):
     if lidar_values is None or len(lidar_values) == 0:
-        return np.zeros(90)  # Default to zeros if no data
+        return np.zeros(45)  # Default to zeros if no data
 
-    num_sectors = 90
+    num_sectors = 45
     sector_size = len(lidar_values) // num_sectors
 
     aggregated = [np.mean(lidar_values[i * sector_size:(i + 1) * sector_size]) for i in range(num_sectors)]
@@ -264,7 +258,6 @@ def process_actions(actions):
     }
 
 
-
 def select_action(policy, state):
     state = torch.FloatTensor(state).to(device).unsqueeze(0)
     means, log_stds, discrete_logits = policy(state)
@@ -293,128 +286,119 @@ def select_action(policy, state):
     return action.detach().cpu().numpy(), log_prob
 
 
-
-def find_largest_opening(lidar_values):
-    """
-    Find the angle and width of the largest opening from LiDAR data.
-    """
-    num_sectors = 90  # Divide LiDAR data into sectors
-    sector_size = len(lidar_values) // num_sectors
-    aggregated_distances = [
-        np.mean(lidar_values[i * sector_size:(i + 1) * sector_size]) for i in range(num_sectors)
-    ]
-
-    # Find the sector with the largest average distance
-    max_distance = max(aggregated_distances)
-    max_index = aggregated_distances.index(max_distance)
-
-    # Convert sector index to angle (radians)
-    sector_angle = 2 * np.pi * max_index / num_sectors
-
-    return sector_angle, max_distance
-
-def compute_reward(is_collision, found, occupancy_grid, pose, time_penalty):
+def compute_reward(drone, is_collision, found, occupancy_grid, pose, semantic_data, time_penalty):
     reward = 0
 
     # Penalize collisions heavily
     if is_collision:
-        reward -= 50
+        reward -= 100
 
-    # Reward movement toward the largest opening
-    #largest_opening_angle, _ = find_largest_opening(lidar_data)
-    #angular_difference = abs(largest_opening_angle - orientation)
-    #angular_difference = min(angular_difference, 2 * np.pi - angular_difference)
-    #reward += 2 * (1 - angular_difference / np.pi)
-
-    # Reward for entering new zones
+    # Reward exploration
     x, y = round(pose.position[0]), round(pose.position[1])
-    if occupancy_grid.mark_zone_as_visited(x, y):
-        reward += 20  # Reward for exploring a new zone
+
+
+    # Reward movement to new zones
+    current_position = x//10, y//10
+    last_zone = occupancy_grid.last_position.position[0]//10, occupancy_grid.last_position.position[1]//10
+    if last_zone == current_position:
+        reward -= 5  # Penalize staying in the same position
     else:
-        reward -= 1
+        reward += 5  # Small reward for movement
 
+    distance_from_origin = np.sqrt((x-drone.init_pose.position[0]) ** 2 + (y-drone.init_pose.position[1]) ** 2)
+    reward += 0.1 * distance_from_origin  # Scale the reward for distance
+
+    if occupancy_grid.mark_zone_as_visited(x, y):
+        reward += 5 * distance_from_origin  # Reward for exploring a new zone
+    else:
+        reward -= 10  # Penalize revisiting explored areas
+
+    # Reward progress towards wounded
+    nearest_wounded = semantic_data[0]*300  # Assume preprocessed semantic data contains distance
+    if nearest_wounded < 300:
+        progress_toward_wounded = max(0, 300 - nearest_wounded) / 300.0  # Normalize
+        reward += 100 * progress_toward_wounded  # Reward scaled by progress
+
+    # Reward for finding the wounded
     if found:
-        reward += 100
+        reward += 500  # Large reward for completing the objective
 
-    # Penalize idling or lack of movement
+    # Penalize idleness
     reward -= time_penalty
 
     return reward
 
 
-def compute_returns(rewards):
-    returns = []
-    g = 0
-    for reward in reversed(rewards):
-        g = reward + GAMMA * g
-        returns.insert(0, g)
-    return returns
 
-
-
-
-policy_net = PolicyNetwork(state_dim=94, action_dim=4)  # 90 Lidar + 4 Semantic
-value_net = ValueNetwork(state_dim=94)
+policy_net = PolicyNetwork(state_dim=49, action_dim=4)
+value_net = ValueNetwork(state_dim=49)
 optimizer_policy = optim.Adam(policy_net.parameters(), lr=LEARNING_RATE)
 optimizer_value = optim.Adam(value_net.parameters(), lr=LEARNING_RATE)
-policy_net.apply(lambda m: m.reset_parameters() if hasattr(m, 'reset_parameters') else None)
 
+# PPO Functions
+def compute_gae(rewards, values, next_values, dones):
+    advantages = []
+    gae = 0
+    for step in reversed(range(len(rewards))):
+        delta = rewards[step] + GAMMA * next_values[step] * (1 - dones[step]) - values[step]
+        gae = delta + GAMMA * LAM * (1 - dones[step]) * gae
+        advantages.insert(0, gae)
+    returns = [adv + val for adv, val in zip(advantages, values)]
+    return advantages, returns
 
-def optimize_batch(states, actions, returns, batch_size=8, entropy_beta=0.1):
-    states = np.array(states, dtype=np.float32)
-    actions = np.array(actions, dtype=np.float32)
-    returns = np.array(returns, dtype=np.float32)
-
+def optimize_ppo(states, actions, log_probs, returns, advantages, batch_size=16):
     dataset_size = len(states)
+    indices = np.arange(dataset_size)
+    np.random.shuffle(indices)
+
     for start_idx in range(0, dataset_size, batch_size):
-        end_idx = min(start_idx + batch_size, dataset_size)
+        end_idx = start_idx + batch_size
+        batch_indices = indices[start_idx:end_idx]
 
-        states_batch = torch.tensor(states[start_idx:end_idx], device=device)
-        actions_batch = torch.tensor(actions[start_idx:end_idx], device=device)
-        returns_batch = torch.tensor(returns[start_idx:end_idx], device=device)
+        states_batch = torch.tensor(np.array(states)[batch_indices], dtype=torch.float32).to(device)
+        actions_batch = torch.FloatTensor(np.array(actions)[batch_indices]).to(device)
+        log_probs_batch = torch.tensor(
+            np.array([log_prob.detach().cpu().numpy() for log_prob in log_probs])[batch_indices],
+            dtype=torch.float32).to(device)
+        returns_batch = torch.FloatTensor(np.array(returns)[batch_indices]).to(device)
+        advantages_batch = torch.FloatTensor(np.array(advantages)[batch_indices]).to(device)
 
-        # Forward pass
+        # Forward pass through networks
         means, log_stds, discrete_logits = policy_net(states_batch)
         values = value_net(states_batch).squeeze()
 
-        # Separate continuous and discrete actions
-        continuous_actions_t = actions_batch[:, :3]
-        discrete_actions_t = actions_batch[:, 3].long()
-
-        # Continuous action log probabilities
+        # Compute new log probabilities
         stds = torch.exp(log_stds)
-        log_probs_continuous = -0.5 * (((continuous_actions_t - means) / (stds + 1e-8)) ** 2 + 2 * log_stds + math.log(2 * math.pi))
-        log_probs_continuous = log_probs_continuous.sum(dim=1)
-
-        # Discrete action log probabilities
+        new_log_probs_continuous = -0.5 * (((actions_batch[:, :3] - means) / stds) ** 2 + 2 * log_stds + math.log(2 * math.pi))
+        new_log_probs_continuous = new_log_probs_continuous.sum(dim=1)
         discrete_action_prob = torch.sigmoid(discrete_logits).squeeze()
-        log_probs_discrete = torch.log(discrete_action_prob + 1e-8) * discrete_actions_t + \
-                             torch.log(1 - discrete_action_prob + 1e-8) * (1 - discrete_actions_t)
+        new_log_probs_discrete = torch.log(discrete_action_prob + 1e-8) * actions_batch[:, 3] + \
+                                 torch.log(1 - discrete_action_prob + 1e-8) * (1 - actions_batch[:, 3])
 
-        # Total log probabilities
-        log_probs = log_probs_continuous + log_probs_discrete
+        new_log_probs = new_log_probs_continuous + new_log_probs_discrete
+        ratios = torch.exp(new_log_probs - log_probs_batch)
 
-        # Compute advantages
-        advantages = returns_batch - values.detach()
-
-        # Policy loss
-        policy_loss = -(log_probs * advantages).mean()
+        # PPO loss
+        surr1 = ratios * advantages_batch
+        surr2 = torch.clamp(ratios, 1 - EPSILON_CLIP, 1 + EPSILON_CLIP) * advantages_batch
+        policy_loss = -torch.min(surr1, surr2).mean()
 
         # Entropy regularization
-        entropy_loss = -entropy_beta * (log_stds + 0.5 * math.log(2 * math.pi * math.e)).sum(dim=1).mean()
-        total_policy_loss = policy_loss + entropy_loss
+        entropy = -0.5 * (1 + 2 * log_stds + math.log(2 * math.pi)).mean()
+        policy_loss -= ENTROPY_BETA * entropy
 
         # Value loss
         value_loss = nn.functional.mse_loss(values, returns_batch)
 
         # Backpropagation
         optimizer_policy.zero_grad()
-        total_policy_loss.backward()
+        policy_loss.backward()
         optimizer_policy.step()
 
         optimizer_value.zero_grad()
         value_loss.backward()
         optimizer_value.step()
+
 
 
 def visualize_occupancy_grid(grid, episode, step):
@@ -431,77 +415,108 @@ def visualize_occupancy_grid(grid, episode, step):
     plt.clf()
 
 
+def compute_returns(rewards, gamma=0.99):
+    """
+    Compute the cumulative discounted rewards (returns) for each timestep.
+
+    Args:
+        rewards (list or np.array): A list of rewards from an episode.
+        gamma (float): Discount factor (default: 0.99).
+
+    Returns:
+        list: A list of cumulative returns for each timestep.
+    """
+    returns = []
+    g = 0  # This will hold the running cumulative reward
+    for reward in reversed(rewards):
+        g = reward + gamma * g  # Accumulate discounted reward
+        returns.insert(0, g)  # Insert at the beginning to reverse the order
+    return returns
+
+
 def train():
     map_training = MyMapIntermediate01()
     playground = map_training.construct_playground(drone_type=MyDrone)
     rewards_per_episode = []
 
+    batch_size = 128  # Mini-batch size for optimization
+
     for episode in range(NB_EPISODES):
         playground.reset()
         for drone in map_training.drones:
-            drone.occupancy_grid = OccupancyGrid(size_area_world=drone.size_area, resolution=10.0, lidar=drone.lidar())
-        #gui = GuiSR(playground=playground, the_map=map_training, draw_semantic_rays=True)
+            drone.grid = OccupancyGrid(size_area_world=drone.size_area, resolution=10.0, lidar=drone.lidar())
+            drone.init_pose.position = drone.measured_gps_position()
+        batch_states, batch_actions, batch_log_probs, batch_rewards = [], [], [], []
+        total_reward, step = 0, 0
         done = False
-        states, actions, rewards = [], [], []
-        total_reward = 0
-        step = 0
-        nb_rescue = 0
-        actions_drones = {}
-        playground.step()
 
         while not done and step < MAX_STEPS and all([drone.drone_health>0 for drone in map_training.drones]):
             step += 1
-            # gui.run()  # Run GUI for visualization
+            actions_drones = {}
             for drone in map_training.drones:
                 lidar_data = preprocess_lidar(drone.lidar_values())
                 semantic_data = preprocess_semantic(drone.semantic_values())
                 state = np.concatenate([lidar_data, semantic_data])
-                action, _ = select_action(drone.policy_net, state)
-                actions_drones[drone] = process_actions(action)
-                orientation = drone.get_orientation()
+                action, log_prob = select_action(drone.policy_net, state)
 
+                actions_drones[drone] = process_actions(action)
                 reward = compute_reward(
-                    is_collision=min(drone.lidar_values()) < 20,
-                    found = semantic_data[0]*300 <40,
-                    occupancy_grid=drone.occupancy_grid,
+                    drone=drone,
+                    is_collision=min(drone.lidar_values()) < 40,
+                    found=semantic_data[0] * 300 < 200,
+                    occupancy_grid=drone.grid,
                     pose=drone.pose,
+                    semantic_data=semantic_data,
                     time_penalty=1
                 )
-                states.append(state)
-                actions.append(action)
-                rewards.append(reward)
-                total_reward += reward
-                nb_rescue += int(drone.is_inside_return_area)
 
+                batch_states.append(state)
+                batch_actions.append(action)
+                batch_log_probs.append(log_prob)
+                batch_rewards.append(reward)
+                total_reward += reward
                 done = semantic_data[0]*300<100
                 if done:
                     print("found wounded !")
+
             playground.step(actions_drones)
             for drone in map_training.drones:
+                drone.grid.last_position.position = drone.pose.position
                 drone.update_pose()  # Update drone pose after the step
-                drone.occupancy_grid.update_grid(drone.pose, step)
+                drone.grid.update_grid(drone.pose, step)
+
+            # Incrementally optimize networks when enough data is collected
+            if len(batch_rewards) >= batch_size or done or step == MAX_STEPS:
+                batch_returns = compute_returns(batch_rewards)
+                batch_advantages = [ret - val for ret, val in zip(batch_returns, batch_rewards)]
+                optimize_ppo(batch_states, batch_actions, batch_log_probs, batch_returns, batch_advantages)
+
+                # Clear batch data after optimization
+                batch_states, batch_actions, batch_log_probs, batch_rewards = [], [], [], []
+
+        rewards_per_episode.append(total_reward)
+
+
 
         if any([drone.drone_health<=0 for drone in map_training.drones]):
             map_training = MyMapIntermediate01()
             playground = map_training.construct_playground(drone_type=MyDrone)
-        # Optimize the policy and value networks in batches
-        returns = compute_returns(rewards)
-        optimize_batch(states, actions, returns, batch_size=8)
-        rewards_per_episode.append(total_reward)
 
-        del states, actions, rewards
+        # Log performance and visualize progress
 
-        if episode % 100 == 1:
-            print(f"Episode {episode}, Reward: {total_reward}, Mean Last 100 Rewards: {np.mean(rewards_per_episode[-100:])}")
-            print(map_training.drones[0].occupancy_grid.visited_zones)
+
+        if episode % 100 == 0:
+            print(f"Episode {episode}, Reward: {total_reward}")
+            print(map_training.drones[0].grid.visited_zones)
             torch.save(policy_net.state_dict(), 'policy_net.pth')
             torch.save(value_net.state_dict(), 'value_net.pth')
-            visualize_occupancy_grid(map_training.drones[0].occupancy_grid.grid, episode, step)
-            #cv2.imshow("Occupancy Grid", map_training.drones[0].occupancy_grid.zoomed_grid)
-            #cv2.waitKey(1)
+            visualize_occupancy_grid(map_training.drones[0].grid.grid, episode, step)
 
-        if np.mean(rewards_per_episode[-100:]) > 10000:
-            print(f"Training solved in {episode} episodes!")
+        for drone in map_training.drones:
+            del drone.grid.grid
+
+        if np.mean(rewards_per_episode[-10:]) > 10000:
+            print(f"Solved in {episode} episodes!")
             break
 
 

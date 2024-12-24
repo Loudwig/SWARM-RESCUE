@@ -26,9 +26,9 @@ class PolicyNetwork(nn.Module):
     def __init__(self, state_dim, action_dim=4):
         super(PolicyNetwork, self).__init__()
         self.fc = nn.Sequential(
-            nn.Linear(state_dim, 64),
+            nn.Linear(state_dim, 128),
             nn.ReLU(),
-            nn.Linear(64, action_dim + 3)  # 3 continuous means + 3 log_stds + 1 discrete logits
+            nn.Linear(128, action_dim + 3)  # 3 continuous means + 3 log_stds + 1 discrete logits
         )
         self.to(device)
 
@@ -53,13 +53,15 @@ class MyDroneEval(DroneAbstract):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.policy_net = PolicyNetwork(state_dim=22, action_dim=4)  # 18 Lidar + 2 Semantic
+        self.policy_net = PolicyNetwork(state_dim=49, action_dim=4)  # 18 Lidar + 2 Semantic
         self.policy_net.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
         self.state = self.Activity.SEARCHING_WOUNDED
 
 
     def control(self):
         lidar_data = preprocess_lidar(self.lidar_values())
+        if min(lidar_data)*300 < 30:
+            print("collision")
         semantic_data = preprocess_semantic(self.semantic_values())
         state = np.concatenate([lidar_data, semantic_data])
         action, _ = select_action(self.policy_net, state)
@@ -75,9 +77,9 @@ class MyDroneEval(DroneAbstract):
 def preprocess_lidar(lidar_values):
     """Groups lidar rays into 18 sectors and computes mean distance per sector."""
     if lidar_values is None or len(lidar_values) == 0:
-        return np.zeros(18)  # Default to zeros if no data
+        return np.zeros(90)  # Default to zeros if no data
 
-    num_sectors = 18
+    num_sectors = 90
     sector_size = len(lidar_values) // num_sectors
 
     aggregated = [np.mean(lidar_values[i * sector_size:(i + 1) * sector_size]) for i in range(num_sectors)]
