@@ -14,6 +14,7 @@ from spg_overlay.reporting.data_saver import DataSaver
 from spg_overlay.reporting.team_info import TeamInfo
 from spg_overlay.gui_map.gui_sr import GuiSR
 
+from maps.map_intermediate_01 import MyMapIntermediate01 as M1
 from maps.map_intermediate_noGPS import MyMapIntermediate01
 from maps.map_intermediate_02 import MyMapIntermediate02
 from maps.map_final_2022_23 import MyMapFinal2022_23
@@ -71,7 +72,7 @@ class Launcher:
         self.team_info = TeamInfo()
         self.eval_plan = EvalPlan()
 
-        eval_config = EvalConfig(map_type=MyMapIntermediate01, nb_rounds=1)
+        eval_config = EvalConfig(map_type=M1, nb_rounds=1)
         self.eval_plan.add(eval_config=eval_config)
 
         # eval_config = EvalConfig(map_type=MyMapIntermediate02)
