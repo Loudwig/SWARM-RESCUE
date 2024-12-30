@@ -25,60 +25,150 @@ LEARNING_RATE = 1e-4
 ENTROPY_BETA = 0.05
 EPSILON_CLIP = 0.2
 LAM = 0.95
-NB_EPISODES = 400
+NB_EPISODES = 1000
 MAX_STEPS = 200
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
-import torch.nn.functional as F
+import cv2
+from spg.view import TopDownView
+
+
+def _create_black_white_image(img_playground):
+    """
+    Converts the playground image to a binary map (walls=1, free space=0).
+    """
+    map_color = cv2.normalize(src=img_playground, dst=None, alpha=0, beta=255,
+                              norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_8U)
+    map_gray = cv2.cvtColor(map_color, cv2.COLOR_BGR2GRAY)
+    _, binary_map = cv2.threshold(map_gray, 127, 1, cv2.THRESH_BINARY)
+    return binary_map
+
 
 class ExploredMapOptimized:
-    def __init__(self, map_playground, device_available=device):
-        self.device = device_available
-        self.map_playground = torch.tensor(map_playground, dtype=torch.float32, device=self.device)
-        self.map_explo_lines = torch.ones_like(self.map_playground)  # Explored lines (white initially)
-        self.map_explo_zones = torch.zeros_like(self.map_playground)  # Explored zones (black initially)
-        self.radius_explo = 200
+    """
+    GPU-accelerated version of the ExploredMap class.
+    Tracks explored areas and computes exploration scores using PyTorch tensors.
+    """
+
+    def __init__(self, playground, device_available=device):
+        """
+        Initializes the explored map using the playground.
+        Args:
+            playground: An instance of ClosedPlayground.
+            device: Device for computation (e.g., "cuda" or "cpu").
+        """
+        self.device = torch.device(device)
+        self._initialize_map(playground)
+        self._reset_maps()
+
+    def _initialize_map(self, playground):
+        """
+        Initializes the base map using the playground's top-down view.
+        Args:
+            playground: An instance of ClosedPlayground.
+        """
+        view = TopDownView(playground=playground, zoom=1)
+        view.update()
+        img_playground = cv2.flip(view.get_np_img(), 0)
+        binary_map = _create_black_white_image(img_playground)
+
+        # Convert the binary map to a PyTorch tensor for GPU acceleration
+        self.map_playground = torch.tensor(binary_map, dtype=torch.float32, device=self.device)
+        self._map_shape = self.map_playground.shape
+
+    def _reset_maps(self):
+        """
+        Resets the exploration maps and counters.
+        """
+        self._map_explo_lines = torch.ones(self._map_shape, dtype=torch.float32, device=self.device)
+        self._map_explo_zones = torch.zeros(self._map_shape, dtype=torch.float32, device=self.device)
+        self._count_explored_pixels = 0
+        self._count_pixel_total = 0
 
     def reset(self):
-        self.map_explo_lines = torch.ones_like(self.map_playground)
-        self.map_explo_zones = torch.zeros_like(self.map_playground)
+        """
+        Resets all internal maps to initial states.
+        """
+        self._reset_maps()
 
-    def update_drones(self, drones_positions):
+    def update_drones(self, drones):
         """
-        Update the list of the positions of the drones.
-        Each drone's position is a tuple (x, y) in world coordinates.
+        Updates the exploration lines based on the drone positions.
+        Args:
+            drones: List of DroneAbstract instances with positions.
         """
-        for x, y in drones_positions:
-            x_idx, y_idx = int(x), int(y)
-            if 0 <= x_idx < self.map_playground.shape[1] and 0 <= y_idx < self.map_playground.shape[0]:
-                self.map_explo_lines[y_idx, x_idx] = 0  # Mark as visited
+        height, width = self._map_explo_lines.shape
+        for drone in drones:
+            position = drone.true_position()
+            grid_x = round(position[0] + width / 2)
+            grid_y = round(-position[1] + height / 2)
 
-    def score(self):
+            if 0 <= grid_x < width and 0 <= grid_y < height:
+                self._map_explo_lines[grid_y, grid_x] = 0.0  # Mark as visited
+
+    def compute_score(self):
         """
-        Compute the exploration score as the ratio of explored to total reachable area.
+        Computes the exploration score as the percentage of reachable pixels explored.
+        Returns:
+            float: The exploration score.
         """
-        # Erosion kernel for zone exploration
+        eroded_map = torch.clone(self._map_explo_lines)
+        radius = 200
         kernel_size = 5
-        kernel = torch.ones((kernel_size, kernel_size), device=self.device)
 
-        # Perform erosion to simulate exploration radius
-        eroded_map = F.conv2d(
-            self.map_explo_lines.unsqueeze(0).unsqueeze(0),
-            kernel.unsqueeze(0).unsqueeze(0),
-            padding=kernel_size // 2
-        ).squeeze()
+        # Create a circular kernel for erosion
+        kernel = self._create_circular_kernel(kernel_size).to(self.device)
+        while radius > 0:
+            current_kernel_size = min(radius, kernel_size)
+            kernel = self._create_circular_kernel(current_kernel_size).to(self.device)
+            eroded_map = torch.nn.functional.conv2d(
+                eroded_map.unsqueeze(0).unsqueeze(0), kernel, padding="same"
+            ).squeeze()
+            radius -= current_kernel_size
 
-        # Keep walls (map_playground == 0) unchanged
-        eroded_map[self.map_playground == 0] = 255
+        self._map_explo_zones = 1.0 - eroded_map
+        self._map_explo_zones[self.map_playground == 1] = 0.0  # Exclude walls
 
-        # Invert eroded map for explored zones
-        self.map_explo_zones = 255 - eroded_map
+        explored_pixels = torch.count_nonzero(self._map_explo_zones).item()
+        total_reachable_pixels = torch.count_nonzero(self.map_playground == 0).item()
+        return explored_pixels / total_reachable_pixels if total_reachable_pixels > 0 else 0.0
 
-        # Compute explored pixel count and total reachable pixel count
-        explored_pixels = (self.map_explo_zones == 0).sum().item()
-        reachable_pixels = (self.map_playground != 0).sum().item()
+    def _create_circular_kernel(self, radius):
+        """
+        Creates a circular kernel with a given radius for erosion.
+        Args:
+            radius: Radius of the circle.
+        Returns:
+            torch.Tensor: A 2D circular kernel.
+        """
+        y, x = torch.meshgrid(
+            torch.arange(-radius, radius + 1, device=self.device),
+            torch.arange(-radius, radius + 1, device=self.device),
+        )
+        kernel = (x**2 + y**2 <= radius**2).float()
+        return kernel.unsqueeze(0).unsqueeze(0)
 
-        return explored_pixels / reachable_pixels if reachable_pixels > 0 else 0.0
+    def get_pretty_map_explo_lines(self):
+        """
+        Returns a visualization of the explored lines.
+        Returns:
+            numpy.ndarray: A grayscale image with walls, free space, and explored lines.
+        """
+        pretty_map = torch.zeros_like(self.map_playground, dtype=torch.float32)
+        pretty_map[self.map_playground == 1] = 255  # Walls
+        pretty_map[self._map_explo_lines == 0] = 128  # Explored lines
+        return pretty_map.cpu().numpy()
+
+    def get_pretty_map_explo_zones(self):
+        """
+        Returns a visualization of the explored zones.
+        Returns:
+            numpy.ndarray: A grayscale image with walls, free space, and explored zones.
+        """
+        pretty_map = torch.zeros_like(self.map_playground, dtype=torch.float32)
+        pretty_map[self.map_playground == 1] = 255  # Walls
+        pretty_map[self._map_explo_zones > 0] = 128  # Explored zones
+        return pretty_map.cpu().numpy()
 
 
 
@@ -241,8 +331,7 @@ def compute_reward(drone, is_collision, found, explored_map, last_explo, pose, s
         reward -= 100
 
     # Reward exploration
-    explored_map.update_drones([(drone.pose.position[0], drone.pose.position[1])])
-    exploration_score = explored_map.score() - last_explo
+    exploration_score = explored_map.compute_score() - last_explo
     reward += 50*exploration_score
 
     # Reward progress towards wounded
@@ -355,14 +444,14 @@ def compute_returns(rewards, gamma=0.99):
 def train():
     map_training = MyMapIntermediate01()
     playground = map_training.construct_playground(drone_type=MyDrone)
-    explored_map = ExploredMapOptimized(map_playground=playground, device_available=device)
+    explored_map = ExploredMapOptimized(playground=playground, device_available=device)
     rewards_per_episode = []
 
-    batch_size = 32  # Mini-batch size for optimization
+    batch_size = 128  # Mini-batch size for optimization
 
     for episode in range(NB_EPISODES):
         playground.reset()
-        map_training.explored_map.reset()
+        explored_map.reset()
         for drone in map_training.drones:
             drone.init_pose.position = drone.measured_gps_position()
         batch_states, batch_actions, batch_log_probs, batch_rewards = [], [], [], []
@@ -379,6 +468,7 @@ def train():
                 action, log_prob = select_action(drone.policy_net, state)
 
                 actions_drones[drone] = process_actions(action)
+                explored_map.update_drones([drone])
                 reward, last_explo = compute_reward(
                     drone=drone,
                     is_collision=min(drone.lidar_values()) < 15,
