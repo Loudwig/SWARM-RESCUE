@@ -111,9 +111,11 @@ class ExploredMapOptimized:
     def compute_score(self, force_update=False):
         """
         Computes the exploration score as the percentage of reachable pixels explored.
-        Optimized for GPU usage.
+        Optimized to avoid unnecessary data transfer and computation overhead.
         Args:
             force_update: Force recalculation of the exploration score.
+        Returns:
+            float: Exploration score.
         """
         if not force_update and self._cached_score is not None:
             return self._cached_score
@@ -129,9 +131,12 @@ class ExploredMapOptimized:
         self._map_explo_zones = 1.0 - eroded_map
         self._map_explo_zones[self.map_playground == 1] = 0.0  # Exclude walls
 
-        # Compute scores directly on the GPU
-        explored_pixels = torch.sum(self._map_explo_zones > 0).float().item()
-        self._cached_score = explored_pixels / self._total_reachable_pixels if self._total_reachable_pixels > 0 else 0.0
+        # Efficient pixel counting using GPU
+        explored_pixels = torch.count_nonzero(self._map_explo_zones > 0).float()
+        total_reachable_pixels = torch.tensor(self._total_reachable_pixels, device=self.device)
+
+        # Compute score directly on GPU
+        self._cached_score = (explored_pixels / total_reachable_pixels).item() if total_reachable_pixels > 0 else 0.0
         return self._cached_score
 
     def _create_circular_kernel(self, radius):
