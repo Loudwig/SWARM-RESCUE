@@ -319,6 +319,10 @@ def train():
 
         rewards_per_episode.append(total_reward)
 
+        if any([drone.drone_health<=0 for drone in map_training.drones]):
+            map_training = MyMapIntermediate01()
+            playground = map_training.construct_playground(drone_type=MyDrone)
+
         if episode % 100 == 0:
             print(f"Episode {episode}, Reward: {total_reward}")
             torch.save(policy_net.state_dict(), 'policy_net_ppo_simple.pth')
