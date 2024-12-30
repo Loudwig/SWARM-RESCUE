@@ -26,7 +26,7 @@ ENTROPY_BETA = 0.05
 EPSILON_CLIP = 0.2
 LAM = 0.95
 NB_EPISODES = 1000
-MAX_STEPS = 300
+MAX_STEPS = 800
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
 import cv2
@@ -380,7 +380,7 @@ def compute_gae(rewards, values, next_values, dones):
     returns = [adv + val for adv, val in zip(advantages, values)]
     return advantages, returns
 
-def optimize_ppo(states, actions, log_probs, returns, advantages, batch_size=2):
+def optimize_ppo(states, actions, log_probs, returns, advantages, batch_size=1024):
     dataset_size = len(states)
     indices = np.arange(dataset_size)
     np.random.shuffle(indices)
@@ -460,7 +460,7 @@ def train():
     explored_map = ExploredMapOptimized(playground=playground, device_available=device)
     rewards_per_episode = []
 
-    batch_size = 128  # Mini-batch size for optimization
+    batch_size = 1024  # Mini-batch size for optimization
 
     for episode in range(NB_EPISODES):
         playground.reset()
@@ -483,7 +483,7 @@ def train():
                 actions_drones[drone] = process_actions(action)
                 explored_map.update_drones([drone])
                 # Compute reward with exploration score update every 10 steps
-                if step % 10 == 0 or done:
+                if step % 2 == 0 or done:
                     reward, explo_score = compute_reward(
                         drone=drone,
                         is_collision=min(drone.lidar_values()) < 15,
@@ -529,7 +529,7 @@ def train():
         # Log performance and visualize progress
 
 
-        if episode % 100 == 0:
+        if episode % 10 == 0:
             print(f"Episode {episode}, Reward: {total_reward}")
             torch.save(policy_net.state_dict(), 'policy_net_ppo.pth')
             torch.save(value_net.state_dict(), 'value_net_ppo.pth')

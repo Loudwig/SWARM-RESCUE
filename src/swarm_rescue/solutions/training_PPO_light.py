@@ -195,8 +195,8 @@ def compute_reward(drone, is_collision, pose, lidar_data, last_position, time_pe
     reward += 5 * dist_moved  # Encourage movement
 
     # Reward for detecting unexplored areas (using LiDAR data)
-    #unexplored_lidar = np.sum(lidar_data < 0.8)  # Count LiDAR hits close to walls/unexplored zones
-    #reward += 10 * unexplored_lidar
+    unexplored_lidar = np.sum(lidar_data < 0.8)  # Count LiDAR hits close to walls/unexplored zones
+    reward += 10 * unexplored_lidar
 
     # Penalize idleness
     reward -= time_penalty

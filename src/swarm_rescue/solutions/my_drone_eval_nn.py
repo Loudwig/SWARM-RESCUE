@@ -19,7 +19,7 @@ from spg_overlay.entities.drone_distance_sensors import DroneSemanticSensor
 
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-model_path = os.path.join(os.path.dirname(__file__), 'policy_net_ppo.pth')
+model_path = os.path.join(os.path.dirname(__file__), 'policy_net_ppo_simple.pth')
 
 
 class PolicyNetwork(nn.Module):
