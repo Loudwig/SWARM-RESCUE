@@ -19,7 +19,7 @@ from spg_overlay.entities.drone_distance_sensors import DroneSemanticSensor
 
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-model_path = os.path.join(os.path.dirname(__file__), 'policy_net.pth')
+model_path = os.path.join(os.path.dirname(__file__), 'policy_net_ppo.pth')
 
 
 class PolicyNetwork(nn.Module):
@@ -60,8 +60,7 @@ class MyDroneEval(DroneAbstract):
 
     def control(self):
         lidar_data = preprocess_lidar(self.lidar_values())
-        if min(lidar_data)*300 < 30:
-            print("collision")
+        print(min(self.lidar_values()))
         semantic_data = preprocess_semantic(self.semantic_values())
         state = np.concatenate([lidar_data, semantic_data])
         action, _ = select_action(self.policy_net, state)
@@ -79,7 +78,7 @@ def preprocess_lidar(lidar_values):
     if lidar_values is None or len(lidar_values) == 0:
         return np.zeros(90)  # Default to zeros if no data
 
-    num_sectors = 90
+    num_sectors = 45
     sector_size = len(lidar_values) // num_sectors
 
     aggregated = [np.mean(lidar_values[i * sector_size:(i + 1) * sector_size]) for i in range(num_sectors)]
