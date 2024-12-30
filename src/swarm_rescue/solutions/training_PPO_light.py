@@ -319,8 +319,10 @@ def train():
 
         rewards_per_episode.append(total_reward)
 
-        if episode % 10 == 0:
-            print(f"Episode {episode}, Total Reward: {total_reward}")
+        if episode % 100 == 0:
+            print(f"Episode {episode}, Reward: {total_reward}")
+            torch.save(policy_net.state_dict(), 'policy_net_ppo_simple.pth')
+            torch.save(value_net.state_dict(), 'value_net_ppo_simple.pth')
 
         if np.mean(rewards_per_episode[-10:]) > 10000:
             print(f"Solved in {episode} episodes!")
