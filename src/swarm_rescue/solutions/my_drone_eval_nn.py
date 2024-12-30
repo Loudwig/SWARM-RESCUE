@@ -60,7 +60,6 @@ class MyDroneEval(DroneAbstract):
 
     def control(self):
         lidar_data = preprocess_lidar(self.lidar_values())
-        print(min(self.lidar_values()))
         semantic_data = preprocess_semantic(self.semantic_values())
         state = np.concatenate([lidar_data, semantic_data])
         action, _ = select_action(self.policy_net, state)

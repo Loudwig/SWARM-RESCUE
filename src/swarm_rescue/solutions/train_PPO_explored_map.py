@@ -109,29 +109,28 @@ class ExploredMapOptimized:
     def compute_score(self):
         """
         Computes the exploration score as the percentage of reachable pixels explored.
-        Returns:
-            float: The exploration score.
+        Optimized for GPU usage.
         """
-        eroded_map = torch.clone(self._map_explo_lines)
-        radius = 200
-        kernel_size = 5
+        if not hasattr(self, "_precomputed_kernel"):
+            # Precompute the largest circular kernel
+            self._precomputed_kernel = self._create_circular_kernel(radius=200)
 
-        # Create a circular kernel for erosion
-        kernel = self._create_circular_kernel(kernel_size).to(self.device)
-        while radius > 0:
-            current_kernel_size = min(radius, kernel_size)
-            kernel = self._create_circular_kernel(current_kernel_size).to(self.device)
-            eroded_map = torch.nn.functional.conv2d(
-                eroded_map.unsqueeze(0).unsqueeze(0), kernel, padding="same"
-            ).squeeze()
-            radius -= current_kernel_size
+        # Perform erosion in one step using the precomputed kernel
+        eroded_map = torch.nn.functional.conv2d(
+            self._map_explo_lines.unsqueeze(0).unsqueeze(0),
+            self._precomputed_kernel,
+            padding="same"
+        ).squeeze()
 
+        # Update the exploration zones incrementally
         self._map_explo_zones = 1.0 - eroded_map
         self._map_explo_zones[self.map_playground == 1] = 0.0  # Exclude walls
 
-        explored_pixels = torch.count_nonzero(self._map_explo_zones).item()
-        total_reachable_pixels = torch.count_nonzero(self.map_playground == 0).item()
-        return explored_pixels / total_reachable_pixels if total_reachable_pixels > 0 else 0.0
+        # Compute scores directly on the GPU
+        explored_pixels = torch.sum(self._map_explo_zones > 0).float()
+        total_reachable_pixels = torch.sum(self.map_playground == 0).float()
+
+        return (explored_pixels / total_reachable_pixels).item() if total_reachable_pixels > 0 else 0.0
 
     def _create_circular_kernel(self, radius):
         """
@@ -144,8 +143,9 @@ class ExploredMapOptimized:
         y, x = torch.meshgrid(
             torch.arange(-radius, radius + 1, device=self.device),
             torch.arange(-radius, radius + 1, device=self.device),
+            indexing="ij"  # Explicitly specify the indexing argument
         )
-        kernel = (x**2 + y**2 <= radius**2).float()
+        kernel = (x ** 2 + y ** 2 <= radius ** 2).float()
         return kernel.unsqueeze(0).unsqueeze(0)
 
     def get_pretty_map_explo_lines(self):
@@ -330,19 +330,24 @@ def compute_reward(drone, is_collision, found, explored_map, last_explo, pose, s
     if is_collision:
         reward -= 100
 
-    # Reward exploration
+    # Exploration reward
     exploration_score = explored_map.compute_score() - last_explo
-    reward += 50*exploration_score
+    reward += 100 * exploration_score  # Higher weight for exploration
 
-    # Reward progress towards wounded
-    nearest_wounded = semantic_data[0]*300  # Assume preprocessed semantic data contains distance
+    # Penalize revisiting the same area
+    grid_x, grid_y = int(pose.position[0]), int(pose.position[1])
+    if explored_map._map_explo_lines[grid_y, grid_x] == 0:
+        reward -= 10  # Penalize revisiting
+
+    # Reward progress towards the goal (e.g., finding wounded)
+    nearest_wounded = semantic_data[0] * 300
     if nearest_wounded < 300:
-        progress_toward_wounded = max(0, 300 - nearest_wounded) / 300.0  # Normalize
-        reward += 100 * progress_toward_wounded  # Reward scaled by progress
+        progress_toward_wounded = max(0, 300 - nearest_wounded) / 300.0
+        reward += 100 * progress_toward_wounded
 
-    # Reward for finding the wounded
+    # Reward for completing the objective
     if found:
-        reward += 500  # Large reward for completing the objective
+        reward += 500
 
     # Penalize idleness
     reward -= time_penalty

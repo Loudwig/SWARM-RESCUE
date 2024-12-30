@@ -150,7 +150,7 @@ class Launcher:
         my_gui = GuiSR(playground=my_playground,
                        the_map=my_map,
                        draw_interactive=False,
-                       use_keyboard=True,
+                       use_keyboard=False,
                        filename_video_capture=filename_video_capture)
 
         window_title = (f"Team: {self.team_info.team_number_str}   -   "
