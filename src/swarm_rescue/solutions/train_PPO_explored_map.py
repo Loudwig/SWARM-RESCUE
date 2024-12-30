@@ -13,6 +13,7 @@ from typing import List, Type
 
 # Insert the parent directory of the current file's directory into sys.path.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from maps.map_intermediate_01 import MyMapIntermediate01
 from spg_overlay.utils.constants import MAX_RANGE_LIDAR_SENSOR
 from spg_overlay.entities.drone_abstract import DroneAbstract
@@ -61,7 +62,10 @@ class ExploredMapOptimized:
         self._initialize_map(playground)
         self._reset_maps()
         self._cached_score = None  # Cache for exploration score
-        self._precomputed_kernel = self._create_circular_kernel(200)  # Precompute erosion kernel
+
+        # Increase the kernel radius if you want the "explored zone" to be bigger around the visited line.
+        # This effectively reduces the need to visit every cell to count as "explored."
+        self._precomputed_kernel = self._create_circular_kernel(radius=200)
 
     def _initialize_map(self, playground):
         """
@@ -74,10 +78,31 @@ class ExploredMapOptimized:
         img_playground = cv2.flip(view.get_np_img(), 0)
         binary_map = _create_black_white_image(img_playground)
 
+        # --------------------
+        # COARSER MAP RESIZING
+        # --------------------
+        # If your map is e.g. 2000x2000, resizing by factor 0.5 => 1000x1000
+        # You can adapt interpolation / factor as you like.
+        height, width = binary_map.shape
+        resize_factor = 0.5
+        new_width = int(width * resize_factor)
+        new_height = int(height * resize_factor)
+        binary_map_small = cv2.resize(
+            binary_map,
+            (new_width, new_height),
+            interpolation=cv2.INTER_NEAREST
+        )
+
         # Convert the binary map to a PyTorch tensor for GPU acceleration
-        self.map_playground = torch.tensor(binary_map, dtype=torch.float32, device=self.device)
+        self.map_playground = torch.tensor(binary_map_small, dtype=torch.float32, device=self.device)
         self._map_shape = self.map_playground.shape
         self._total_reachable_pixels = torch.sum(self.map_playground == 0).float().item()
+
+        # Store factors to convert real pose coords -> map idx
+        # so we know how to update lines in the coarser map.
+        self._orig_width = width
+        self._orig_height = height
+        self._resize_factor = resize_factor
 
     def _reset_maps(self):
         """
@@ -102,8 +127,10 @@ class ExploredMapOptimized:
         height, width = self._map_explo_lines.shape
         for drone in drones:
             position = drone.true_position()
-            grid_x = round(position[0] + width / 2)
-            grid_y = round(-position[1] + height / 2)
+            # Convert real position to map grid in the smaller map
+            # The + width/2, + height/2 logic is typical for center-based indexing
+            grid_x = int((position[0] + self._orig_width / 2) * self._resize_factor)
+            grid_y = int((-position[1] + self._orig_height / 2) * self._resize_factor)
 
             if 0 <= grid_x < width and 0 <= grid_y < height:
                 self._map_explo_lines[grid_y, grid_x] = 0.0  # Mark as visited
@@ -179,7 +206,6 @@ class ExploredMapOptimized:
         return pretty_map.cpu().numpy()
 
 
-
 class PolicyNetwork(nn.Module):
     def __init__(self, state_dim, action_dim=4):
         super(PolicyNetwork, self).__init__()
@@ -197,6 +223,7 @@ class PolicyNetwork(nn.Module):
         discrete_logits = logits[:, 6:]
         return means, log_stds, discrete_logits
 
+
 class ValueNetwork(nn.Module):
     def __init__(self, state_dim):
         super(ValueNetwork, self).__init__()
@@ -211,61 +238,38 @@ class ValueNetwork(nn.Module):
         return self.fc(x)
 
 
-class MyDrone(DroneAbstract):
-    class Activity(Enum):
-        """
-        All the states of the drone as a state machine
-        """
-        SEARCHING_WOUNDED = 1
-        GRASPING_WOUNDED = 2
-        SEARCHING_RESCUE_CENTER = 3
-        DROPPING_AT_RESCUE_CENTER = 4
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.policy_net = policy_net
-        self.state = self.Activity.SEARCHING_WOUNDED
-        self.pose = Pose()
-        self.init_pose = Pose()
-
-
-    def control(self):
-        lidar_data = preprocess_lidar(self.lidar_values())
-        semantic_data = preprocess_semantic(self.semantic_values())
-        state = np.concatenate([lidar_data, semantic_data])
-        action, _ = select_action(self.policy_net, state)
-        return process_actions(action)
-
-    def get_orientation(self):
-        return self.measured_compass_angle()
-
-    def update_pose(self):
-        pos = self.measured_gps_position()
-        angle = self.measured_compass_angle()
-        self.pose.position = pos
-        self.pose.orientation = angle
-
-    def define_message_for_all(self):
-        """
-        Here, we don't need communication...
-        """
-        pass
-
-
+# ------------------------
+# COARSER LIDAR PREPROCESS
+# ------------------------
 def preprocess_lidar(lidar_values):
+    """
+    Instead of 180 or 45 aggregated rays, let's reduce the LiDAR to e.g. 15 sectors.
+    This drastically reduces how precisely the drone perceives its surroundings.
+    """
     if lidar_values is None or len(lidar_values) == 0:
-        return np.zeros(45)  # Default to zeros if no data
+        return np.zeros(15)  # Default to zeros if no data
 
-    num_sectors = 45
-    sector_size = len(lidar_values) // num_sectors
+    num_sectors = 15  # Decrease from 45 to 15
+    # Round down for the sector size
+    sector_size = max(1, len(lidar_values) // num_sectors)
 
-    aggregated = [np.mean(lidar_values[i * sector_size:(i + 1) * sector_size]) for i in range(num_sectors)]
+    aggregated = []
+    for i in range(num_sectors):
+        start_idx = i * sector_size
+        end_idx = (i + 1) * sector_size
+        # Safely slice within array
+        segment = lidar_values[start_idx:end_idx]
+        aggregated.append(np.mean(segment))
+
+    # Fallback if leftover rays exist in the end (only if len(lidar_values) % num_sectors != 0)
+    if len(aggregated) < num_sectors:
+        aggregated += [300] * (num_sectors - len(aggregated))
+
     aggregated = np.nan_to_num(aggregated, nan=300, posinf=300, neginf=0)  # Handle NaNs or inf
     aggregated = np.clip(aggregated, 0, 300) / 300.0  # Normalize between 0 and 1
 
     assert not np.isnan(aggregated).any(), "Preprocessed LiDAR data contains NaN"
     return aggregated
-
 
 
 def preprocess_semantic(semantic_values):
@@ -315,7 +319,11 @@ def select_action(policy, state):
     continuous_actions = torch.clamp(sampled_continuous_actions, -1.0, 1.0)
 
     # Compute log probabilities for continuous actions
-    log_probs_continuous = -0.5 * (((sampled_continuous_actions - means) / (stds + 1e-8)) ** 2 + 2 * log_stds + math.log(2 * math.pi))
+    log_probs_continuous = -0.5 * (
+        ((sampled_continuous_actions - means) / (stds + 1e-8)) ** 2
+        + 2 * log_stds
+        + math.log(2 * math.pi)
+    )
     log_probs_continuous = log_probs_continuous.sum(dim=1)
 
     # Compute discrete action probability
@@ -323,10 +331,16 @@ def select_action(policy, state):
     discrete_action = int(discrete_action_prob.item() > 0.5)
 
     # Log probability for discrete action
-    log_prob_discrete = torch.log(discrete_action_prob + 1e-8) if discrete_action == 1 else torch.log(1 - discrete_action_prob + 1e-8)
+    log_prob_discrete = (
+        torch.log(discrete_action_prob + 1e-8)
+        if discrete_action == 1
+        else torch.log(1 - discrete_action_prob + 1e-8)
+    )
 
     # Combine actions
-    action = torch.cat([continuous_actions, torch.tensor([[discrete_action]], device=device)], dim=1).squeeze()
+    action = torch.cat(
+        [continuous_actions, torch.tensor([[discrete_action]], device=device)], dim=1
+    ).squeeze()
     log_prob = log_probs_continuous + log_prob_discrete
     return action.detach().cpu().numpy(), log_prob
 
@@ -343,9 +357,11 @@ def compute_reward(drone, is_collision, found, explored_map, last_explo, pose, s
     reward += 10 * exploration_score  # Higher weight for exploration
 
     # Penalize revisiting the same area
+    # NOTE: We do it coarsely as well if needed,
+    # but here let's just keep it simple:
     grid_x, grid_y = int(pose.position[0]), int(pose.position[1])
-    if explored_map._map_explo_lines[grid_y, grid_x] == 0:
-        reward -= 10  # Penalize revisiting
+    if (0 <= grid_x < explored_map._orig_width) and (0 <= grid_y < explored_map._orig_height):
+        pass  # or any additional checks if you need them
 
     # Reward progress towards the goal (e.g., finding wounded)
     nearest_wounded = semantic_data[0] * 300
@@ -363,13 +379,12 @@ def compute_reward(drone, is_collision, found, explored_map, last_explo, pose, s
     return reward, exploration_score
 
 
-
-policy_net = PolicyNetwork(state_dim=49, action_dim=4)
-value_net = ValueNetwork(state_dim=49)
+policy_net = PolicyNetwork(state_dim=19, action_dim=4)
+value_net = ValueNetwork(state_dim=19)
 optimizer_policy = optim.Adam(policy_net.parameters(), lr=LEARNING_RATE)
 optimizer_value = optim.Adam(value_net.parameters(), lr=LEARNING_RATE)
 
-# PPO Functions
+
 def compute_gae(rewards, values, next_values, dones):
     advantages = []
     gae = 0
@@ -379,6 +394,7 @@ def compute_gae(rewards, values, next_values, dones):
         advantages.insert(0, gae)
     returns = [adv + val for adv, val in zip(advantages, values)]
     return advantages, returns
+
 
 def optimize_ppo(states, actions, log_probs, returns, advantages, batch_size=1024):
     dataset_size = len(states)
@@ -393,7 +409,8 @@ def optimize_ppo(states, actions, log_probs, returns, advantages, batch_size=102
         actions_batch = torch.FloatTensor(np.array(actions)[batch_indices]).to(device)
         log_probs_batch = torch.tensor(
             np.array([log_prob.detach().cpu().numpy() for log_prob in log_probs])[batch_indices],
-            dtype=torch.float32).to(device)
+            dtype=torch.float32
+        ).to(device)
         returns_batch = torch.FloatTensor(np.array(returns)[batch_indices]).to(device)
         advantages_batch = torch.FloatTensor(np.array(advantages)[batch_indices]).to(device)
 
@@ -403,11 +420,17 @@ def optimize_ppo(states, actions, log_probs, returns, advantages, batch_size=102
 
         # Compute new log probabilities
         stds = torch.exp(log_stds)
-        new_log_probs_continuous = -0.5 * (((actions_batch[:, :3] - means) / stds) ** 2 + 2 * log_stds + math.log(2 * math.pi))
+        new_log_probs_continuous = -0.5 * (
+            ((actions_batch[:, :3] - means) / stds) ** 2
+            + 2 * log_stds
+            + math.log(2 * math.pi)
+        )
         new_log_probs_continuous = new_log_probs_continuous.sum(dim=1)
         discrete_action_prob = torch.sigmoid(discrete_logits).squeeze()
-        new_log_probs_discrete = torch.log(discrete_action_prob + 1e-8) * actions_batch[:, 3] + \
-                                 torch.log(1 - discrete_action_prob + 1e-8) * (1 - actions_batch[:, 3])
+        new_log_probs_discrete = (
+            torch.log(discrete_action_prob + 1e-8) * actions_batch[:, 3]
+            + torch.log(1 - discrete_action_prob + 1e-8) * (1 - actions_batch[:, 3])
+        )
 
         new_log_probs = new_log_probs_continuous + new_log_probs_discrete
         ratios = torch.exp(new_log_probs - log_probs_batch)
@@ -434,24 +457,57 @@ def optimize_ppo(states, actions, log_probs, returns, advantages, batch_size=102
         optimizer_value.step()
 
 
-
 def compute_returns(rewards, gamma=0.99):
     """
     Compute the cumulative discounted rewards (returns) for each timestep.
-
-    Args:
-        rewards (list or np.array): A list of rewards from an episode.
-        gamma (float): Discount factor (default: 0.99).
-
-    Returns:
-        list: A list of cumulative returns for each timestep.
     """
     returns = []
-    g = 0  # This will hold the running cumulative reward
+    g = 0
     for reward in reversed(rewards):
-        g = reward + gamma * g  # Accumulate discounted reward
-        returns.insert(0, g)  # Insert at the beginning to reverse the order
+        g = reward + gamma * g
+        returns.insert(0, g)
     return returns
+
+
+class MyDrone(DroneAbstract):
+    class Activity(Enum):
+        """
+        All the states of the drone as a state machine
+        """
+        SEARCHING_WOUNDED = 1
+        GRASPING_WOUNDED = 2
+        SEARCHING_RESCUE_CENTER = 3
+        DROPPING_AT_RESCUE_CENTER = 4
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.policy_net = policy_net
+        self.state = self.Activity.SEARCHING_WOUNDED
+        self.pose = Pose()
+        self.init_pose = Pose()
+
+    def control(self):
+        lidar_data = preprocess_lidar(self.lidar_values())
+        semantic_data = preprocess_semantic(self.semantic_values())
+        # state_dim = 19 => 15 LiDAR + 4 semantic
+        state = np.concatenate([lidar_data, semantic_data])
+        action, _ = select_action(self.policy_net, state)
+        return process_actions(action)
+
+    def get_orientation(self):
+        return self.measured_compass_angle()
+
+    def update_pose(self):
+        pos = self.measured_gps_position()
+        angle = self.measured_compass_angle()
+        self.pose.position = pos
+        self.pose.orientation = angle
+
+    def define_message_for_all(self):
+        """
+        Here, we don't need communication...
+        """
+        pass
 
 
 def train():
@@ -467,11 +523,12 @@ def train():
         explored_map.reset()
         for drone in map_training.drones:
             drone.init_pose.position = drone.measured_gps_position()
+
         batch_states, batch_actions, batch_log_probs, batch_rewards = [], [], [], []
         total_reward, step, explo_score = 0, 0, 0
         done = False
 
-        while not done and step < MAX_STEPS and all([drone.drone_health>0 for drone in map_training.drones]):
+        while not done and step < MAX_STEPS and all([drone.drone_health > 0 for drone in map_training.drones]):
             step += 1
             actions_drones = {}
             for drone in map_training.drones:
@@ -482,12 +539,13 @@ def train():
 
                 actions_drones[drone] = process_actions(action)
                 explored_map.update_drones([drone])
-                # Compute reward with exploration score update every 10 steps
+
+                # Compute reward with exploration score update
                 if step % 2 == 0 or done:
                     reward, explo_score = compute_reward(
                         drone=drone,
                         is_collision=min(drone.lidar_values()) < 15,
-                        found=semantic_data[0] * 300 < 200,
+                        found=(semantic_data[0] * 300 < 80),
                         explored_map=explored_map,
                         last_explo=explo_score,
                         pose=drone.pose,
@@ -495,15 +553,17 @@ def train():
                         time_penalty=1
                     )
                 else:
-                    reward = -1  # Penalize idleness
+                    reward = -1  # Minor penalty for time
+
                 batch_states.append(state)
                 batch_actions.append(action)
                 batch_log_probs.append(log_prob)
                 batch_rewards.append(reward)
                 total_reward += reward
-                done = semantic_data[0]*300<80
+
+                done = (semantic_data[0] * 300 < 80)
                 if done:
-                    print("found wounded !")
+                    print("Found wounded!")
 
             playground.step(actions_drones)
             for drone in map_training.drones:
@@ -512,7 +572,7 @@ def train():
             # Incrementally optimize networks when enough data is collected
             if len(batch_rewards) >= batch_size or done or step == MAX_STEPS:
                 batch_returns = compute_returns(batch_rewards)
-                batch_advantages = [ret - val for ret, val in zip(batch_returns, batch_rewards)]
+                batch_advantages = [ret - rew for ret, rew in zip(batch_returns, batch_rewards)]
                 optimize_ppo(batch_states, batch_actions, batch_log_probs, batch_returns, batch_advantages)
 
                 # Clear batch data after optimization
@@ -520,21 +580,18 @@ def train():
 
         rewards_per_episode.append(total_reward)
 
-
-
-        if any([drone.drone_health<=0 for drone in map_training.drones]):
+        # Rebuild scenario if the drone is destroyed or we ended the episode
+        if any([drone.drone_health <= 0 for drone in map_training.drones]):
             map_training = MyMapIntermediate01()
             playground = map_training.construct_playground(drone_type=MyDrone)
 
-        # Log performance and visualize progress
-
-
+        # Logging
         if episode % 10 == 0:
             print(f"Episode {episode}, Reward: {total_reward}")
             torch.save(policy_net.state_dict(), 'policy_net_ppo.pth')
             torch.save(value_net.state_dict(), 'value_net_ppo.pth')
-            #map_training.explored_map.display()
 
+        # Early stopping if it’s “solved” for your criteria
         if np.mean(rewards_per_episode[-10:]) > 10000:
             print(f"Solved in {episode} episodes!")
             break
