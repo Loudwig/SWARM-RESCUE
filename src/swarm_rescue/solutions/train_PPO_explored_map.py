@@ -26,7 +26,7 @@ ENTROPY_BETA = 0.05
 EPSILON_CLIP = 0.2
 LAM = 0.95
 NB_EPISODES = 1000
-MAX_STEPS = 200
+MAX_STEPS = 300
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
 import cv2
@@ -334,8 +334,8 @@ def compute_reward(drone, is_collision, found, explored_map, last_explo, pose, s
         reward -= 100
 
     # Exploration reward
-    exploration_score = explored_map.compute_score() - last_explo
-    reward += 100 * exploration_score  # Higher weight for exploration
+    exploration_score = explored_map.compute_score(force_update=True) - last_explo
+    reward += 10 * exploration_score  # Higher weight for exploration
 
     # Penalize revisiting the same area
     grid_x, grid_y = int(pose.position[0]), int(pose.position[1])
@@ -479,7 +479,6 @@ def train():
                 explored_map.update_drones([drone])
                 # Compute reward with exploration score update every 10 steps
                 if step % 10 == 0 or done:
-                    new_explo_score = explored_map.compute_score(force_update=True)
                     reward, explo_score = compute_reward(
                         drone=drone,
                         is_collision=min(drone.lidar_values()) < 15,
