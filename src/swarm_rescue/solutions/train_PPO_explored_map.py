@@ -27,7 +27,59 @@ EPSILON_CLIP = 0.2
 LAM = 0.95
 NB_EPISODES = 400
 MAX_STEPS = 200
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+
+import torch.nn.functional as F
+
+class ExploredMapOptimized:
+    def __init__(self, map_playground, device_available=device):
+        self.device = device_available
+        self.map_playground = torch.tensor(map_playground, dtype=torch.float32, device=self.device)
+        self.map_explo_lines = torch.ones_like(self.map_playground)  # Explored lines (white initially)
+        self.map_explo_zones = torch.zeros_like(self.map_playground)  # Explored zones (black initially)
+        self.radius_explo = 200
+
+    def reset(self):
+        self.map_explo_lines = torch.ones_like(self.map_playground)
+        self.map_explo_zones = torch.zeros_like(self.map_playground)
+
+    def update_drones(self, drones_positions):
+        """
+        Update the list of the positions of the drones.
+        Each drone's position is a tuple (x, y) in world coordinates.
+        """
+        for x, y in drones_positions:
+            x_idx, y_idx = int(x), int(y)
+            if 0 <= x_idx < self.map_playground.shape[1] and 0 <= y_idx < self.map_playground.shape[0]:
+                self.map_explo_lines[y_idx, x_idx] = 0  # Mark as visited
+
+    def score(self):
+        """
+        Compute the exploration score as the ratio of explored to total reachable area.
+        """
+        # Erosion kernel for zone exploration
+        kernel_size = 5
+        kernel = torch.ones((kernel_size, kernel_size), device=self.device)
+
+        # Perform erosion to simulate exploration radius
+        eroded_map = F.conv2d(
+            self.map_explo_lines.unsqueeze(0).unsqueeze(0),
+            kernel.unsqueeze(0).unsqueeze(0),
+            padding=kernel_size // 2
+        ).squeeze()
+
+        # Keep walls (map_playground == 0) unchanged
+        eroded_map[self.map_playground == 0] = 255
+
+        # Invert eroded map for explored zones
+        self.map_explo_zones = 255 - eroded_map
+
+        # Compute explored pixel count and total reachable pixel count
+        explored_pixels = (self.map_explo_zones == 0).sum().item()
+        reachable_pixels = (self.map_playground != 0).sum().item()
+
+        return explored_pixels / reachable_pixels if reachable_pixels > 0 else 0.0
+
 
 
 class PolicyNetwork(nn.Module):
@@ -189,7 +241,7 @@ def compute_reward(drone, is_collision, found, explored_map, last_explo, pose, s
         reward -= 100
 
     # Reward exploration
-    explored_map.update_drones([drone])
+    explored_map.update_drones([(drone.pose.position[0], drone.pose.position[1])])
     exploration_score = explored_map.score() - last_explo
     reward += 50*exploration_score
 
@@ -303,6 +355,7 @@ def compute_returns(rewards, gamma=0.99):
 def train():
     map_training = MyMapIntermediate01()
     playground = map_training.construct_playground(drone_type=MyDrone)
+    explored_map = ExploredMapOptimized(map_playground=playground, device_available=device)
     rewards_per_episode = []
 
     batch_size = 32  # Mini-batch size for optimization
@@ -330,7 +383,7 @@ def train():
                     drone=drone,
                     is_collision=min(drone.lidar_values()) < 15,
                     found=semantic_data[0] * 300 < 200,
-                    explored_map=map_training.explored_map,
+                    explored_map=explored_map,
                     last_explo=explo_score,
                     pose=drone.pose,
                     semantic_data=semantic_data,
