@@ -57,9 +57,11 @@ class ExploredMapOptimized:
             playground: An instance of ClosedPlayground.
             device: Device for computation (e.g., "cuda" or "cpu").
         """
-        self.device = torch.device(device)
+        self.device = torch.device(device_available)
         self._initialize_map(playground)
         self._reset_maps()
+        self._cached_score = None  # Cache for exploration score
+        self._precomputed_kernel = self._create_circular_kernel(200)  # Precompute erosion kernel
 
     def _initialize_map(self, playground):
         """
@@ -75,6 +77,7 @@ class ExploredMapOptimized:
         # Convert the binary map to a PyTorch tensor for GPU acceleration
         self.map_playground = torch.tensor(binary_map, dtype=torch.float32, device=self.device)
         self._map_shape = self.map_playground.shape
+        self._total_reachable_pixels = torch.sum(self.map_playground == 0).float().item()
 
     def _reset_maps(self):
         """
@@ -82,8 +85,7 @@ class ExploredMapOptimized:
         """
         self._map_explo_lines = torch.ones(self._map_shape, dtype=torch.float32, device=self.device)
         self._map_explo_zones = torch.zeros(self._map_shape, dtype=torch.float32, device=self.device)
-        self._count_explored_pixels = 0
-        self._count_pixel_total = 0
+        self._cached_score = None  # Reset cached score
 
     def reset(self):
         """
@@ -106,14 +108,15 @@ class ExploredMapOptimized:
             if 0 <= grid_x < width and 0 <= grid_y < height:
                 self._map_explo_lines[grid_y, grid_x] = 0.0  # Mark as visited
 
-    def compute_score(self):
+    def compute_score(self, force_update=False):
         """
         Computes the exploration score as the percentage of reachable pixels explored.
         Optimized for GPU usage.
+        Args:
+            force_update: Force recalculation of the exploration score.
         """
-        if not hasattr(self, "_precomputed_kernel"):
-            # Precompute the largest circular kernel
-            self._precomputed_kernel = self._create_circular_kernel(radius=200)
+        if not force_update and self._cached_score is not None:
+            return self._cached_score
 
         # Perform erosion in one step using the precomputed kernel
         eroded_map = torch.nn.functional.conv2d(
@@ -127,10 +130,9 @@ class ExploredMapOptimized:
         self._map_explo_zones[self.map_playground == 1] = 0.0  # Exclude walls
 
         # Compute scores directly on the GPU
-        explored_pixels = torch.sum(self._map_explo_zones > 0).float()
-        total_reachable_pixels = torch.sum(self.map_playground == 0).float()
-
-        return (explored_pixels / total_reachable_pixels).item() if total_reachable_pixels > 0 else 0.0
+        explored_pixels = torch.sum(self._map_explo_zones > 0).float().item()
+        self._cached_score = explored_pixels / self._total_reachable_pixels if self._total_reachable_pixels > 0 else 0.0
+        return self._cached_score
 
     def _create_circular_kernel(self, radius):
         """
@@ -143,9 +145,10 @@ class ExploredMapOptimized:
         y, x = torch.meshgrid(
             torch.arange(-radius, radius + 1, device=self.device),
             torch.arange(-radius, radius + 1, device=self.device),
-            indexing="ij"  # Explicitly specify the indexing argument
+            indexing="ij"
         )
         kernel = (x ** 2 + y ** 2 <= radius ** 2).float()
+        kernel /= kernel.sum()  # Normalize for convolution
         return kernel.unsqueeze(0).unsqueeze(0)
 
     def get_pretty_map_explo_lines(self):
@@ -474,16 +477,21 @@ def train():
 
                 actions_drones[drone] = process_actions(action)
                 explored_map.update_drones([drone])
-                reward, last_explo = compute_reward(
-                    drone=drone,
-                    is_collision=min(drone.lidar_values()) < 15,
-                    found=semantic_data[0] * 300 < 200,
-                    explored_map=explored_map,
-                    last_explo=explo_score,
-                    pose=drone.pose,
-                    semantic_data=semantic_data,
-                    time_penalty=1
-                )
+                # Compute reward with exploration score update every 10 steps
+                if step % 10 == 0 or done:
+                    new_explo_score = explored_map.compute_score(force_update=True)
+                    reward, explo_score = compute_reward(
+                        drone=drone,
+                        is_collision=min(drone.lidar_values()) < 15,
+                        found=semantic_data[0] * 300 < 200,
+                        explored_map=explored_map,
+                        last_explo=explo_score,
+                        pose=drone.pose,
+                        semantic_data=semantic_data,
+                        time_penalty=1
+                    )
+                else:
+                    reward = -1  # Penalize idleness
                 batch_states.append(state)
                 batch_actions.append(action)
                 batch_log_probs.append(log_prob)
