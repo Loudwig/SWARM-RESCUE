@@ -28,23 +28,19 @@ class Position:
     def y(self):
         return self.data[1]
 
-
-# class Pose:
-#     def __init__(self, position=Position(), orientation=0.0):
-#         if not isinstance(position, Position):
-#             print("type position=", type(position))
-#             raise TypeError("position must be an instance of Position")
-#         self.position: Position = position
-#         self.orientation: float = orientation
-
-
 class Pose:
     def __init__(self, position=np.zeros(2, ), orientation=0.0,odometer=[0.0,0.0,0.0],previous_position=np.zeros(2, ),previous_orientation=0.0,taille :Tuple[float, float] = (0.0,0.0)):
+        
+
+        self.vitesse_X = np.cos(normalize_angle(odometer[1]))*odometer[0]
+        self.vitesse_Y = np.sin(normalize_angle(odometer[1]))*odometer[0]
+        self.vitesse_angulaire = normalize_angle(odometer[2])
 
         if not isinstance(position, np.ndarray):
             print("type position=", type(position))
             raise TypeError("position must be an instance of np.ndarray")
         
+        # GPS NON AVAILABLE
         if position is None or orientation is None:
             self.gps = False
             
@@ -65,6 +61,7 @@ class Pose:
             
             #print(f"odom={odometer}")
 
+        # GPS AVAILABLE
         else : 
             #print("GPS available")
             self.gps = True
