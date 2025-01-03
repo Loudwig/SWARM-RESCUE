@@ -1,5 +1,9 @@
 import numpy as np
 from spg_overlay.utils.grid import Grid
+from spg_overlay.utils.constants import MAX_RANGE_LIDAR_SENSOR
+from solutions.utils.pose import Pose
+import cv2
+
 
 class OccupancyGrid(Grid):
     """Simple occupancy grid"""
@@ -28,6 +32,7 @@ class OccupancyGrid(Grid):
         self.grid = np.zeros((self.x_max_grid, self.y_max_grid))
         self.position_grid = np.zeros((self.x_max_grid, self.y_max_grid))
         self.zoomed_grid = np.empty((self.x_max_grid, self.y_max_grid))
+        self.zoomed_position_grid = np.empty((self.x_max_grid, self.y_max_grid))
         
         self.grid_score = 0
         self.grid_previous_score = 0
@@ -38,7 +43,8 @@ class OccupancyGrid(Grid):
         Compute the score of the grid
         """
         seuil = 0.2
-        self.grid_score = np.sum(abs(self.grid) >= seuil) / (self.x_max_grid * self.y_max_grid)
+        self.grid_score = np.sum(abs(self.grid) >= seuil) 
+        # self.grid_score /= self.x_max_grid * self.y_max_grid
 
     def compute_exploration_score(self):
         self.exploration_score = self.grid_score - self.grid_previous_score
@@ -71,7 +77,7 @@ class OccupancyGrid(Grid):
         self.grid_previous_score = self.grid_score
 
         self.position_grid = np.zeros((self.x_max_grid, self.y_max_grid))
-        self.position_grid[self._conv_world_to_grid(pose.position[0]), self._conv_world_to_grid(pose.position[1])] = 1
+        self.position_grid[self._conv_world_to_grid(pose.position[0],pose.position[1])] = 1
 
         """
         Bayesian map update with new observation
@@ -136,9 +142,14 @@ class OccupancyGrid(Grid):
         self.compute_grid_score()
         self.compute_exploration_score()
         # compute zoomed grid for displaying
+        self.zoomed_position_grid = self.position_grid.copy()
         self.zoomed_grid = self.grid.copy()
         
         new_zoomed_size = (int(self.size_area_world[1] * 0.5),
                            int(self.size_area_world[0] * 0.5))
+
+        self.zoomed_position_grid = cv2.resize(self.zoomed_position_grid, new_zoomed_size,
+                                      interpolation=cv2.INTER_NEAREST)
+        
         self.zoomed_grid = cv2.resize(self.zoomed_grid, new_zoomed_size,
                                       interpolation=cv2.INTER_NEAREST)
