@@ -1,16 +1,17 @@
 import torch 
 import torch.nn as nn
 import torch.nn.functional as F
+import math
 
 class NetworkValue(nn.Module):
     def __init__(self, map_channels= 2,h =100,w = 63,cnn_output_dim = 64,global_state_dim = 6,hidden_size = 32,num_actions = 3):
         super(NetworkValue, self).__init__()
         self.cnn = nn.Sequential(
-            nn.Conv2d(map_channels, 16, kernel_size=3, stride=1, padding=1),
+            nn.Conv2d(map_channels, 16, kernel_size=3, stride=2, padding=1),
             nn.ReLU(),
-            nn.Conv2d(16, 32, kernel_size=3, stride=1, padding=1),
+            nn.Conv2d(16, 32, kernel_size=3, stride=2, padding=1),
             nn.ReLU(),
-            nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1),
+            nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1),
             nn.ReLU()
         )
 

@@ -7,11 +7,11 @@ class NetworkPolicy(nn.Module):
     def __init__(self, map_channels= 2,h =100,w = 63,cnn_output_dim = 64,global_state_dim = 6,hidden_size = 32,num_actions = 3):
         super(NetworkPolicy, self).__init__()
         self.cnn = nn.Sequential(
-            nn.Conv2d(map_channels, 16, kernel_size=3, stride=1, padding=1),
+            nn.Conv2d(map_channels, 16, kernel_size=3, stride=2, padding=1),
             nn.ReLU(),
-            nn.Conv2d(16, 32, kernel_size=3, stride=1, padding=1),
+            nn.Conv2d(16, 32, kernel_size=3, stride=2, padding=1),
             nn.ReLU(),
-            nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1),
+            nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1),
             nn.ReLU()
         )
 
@@ -35,9 +35,14 @@ class NetworkPolicy(nn.Module):
         self.log_sigma_head = nn.Linear(hidden_size, num_actions)
     
     def forward(self, map, global_state):
+        # print(f"map shape: {map.shape}")
         x = self.cnn(map)
+        # print(f"x shape aften cnn: {x.shape}")
         x = x.view(x.size(0), -1)
+        # print(f"x shape after view: {x.shape}")
         x = F.relu(self.fc_cnn(x))
+        # print(f"x shape after fc_cnn: {x.shape}")
+        # print(f"global_state shape: {global_state.shape}")
         x = torch.cat((x, global_state), dim=1)
         x = self.mlp(x) 
         mu = self.mu_head(x)
@@ -47,17 +52,3 @@ class NetworkPolicy(nn.Module):
     # sample an action from the policy with tanh squashing
     # correction du log_prob termes dans le jacobian
 
-    def sample(self, maps, global_state):
-        means, log_stds = self.forward(maps, global_state)
-        
-        stds = torch.exp(log_stds)
-        sampled_continuous_actions = means + torch.randn_like(means) * stds
-
-        # Clamp continuous actions to valid range
-        continuous_actions = torch.clamp(sampled_continuous_actions, -1.0, 1.0)
-
-        # Compute log probabilities for continuous actions
-        log_probs_continuous = -0.5 * (((sampled_continuous_actions - means) / (stds + 1e-8)) ** 2 + 2 * log_stds + math.log(2 * math.pi))
-        log_probs_continuous = log_probs_continuous.sum(dim=1)
-
-        return continuous_actions, log_probs_continuous

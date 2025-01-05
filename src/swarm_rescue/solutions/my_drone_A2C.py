@@ -84,6 +84,7 @@ class MyDroneHulk(DroneAbstract):
         pass
 
     def control(self):
+        print("Control")
         self.timestep_count +=1 
         self.update_map_pose_speed()
         maps = torch.tensor([self.grid.grid, self.grid.position_grid], dtype=torch.float32, device=device).unsqueeze(0)
@@ -116,10 +117,20 @@ class MyDroneHulk(DroneAbstract):
 
         return min_dist
     
-    def compute_reward(self,is_collision, found_wounded, time_penalty):
+    def compute_reward(self,is_collision, found_wounded, time_penalty,action):
+        forward = action["forward"]
+        lateral = action["lateral"]
+        rotation = action["rotation"]
+
+        
+        
+        
+        
         reward = 0
 
         # Penalize collisions heavily
+
+
         if is_collision:
             reward -= 50
 
@@ -132,6 +143,11 @@ class MyDroneHulk(DroneAbstract):
         # Penalize idling or lack of movement
         reward -= time_penalty
 
+        # give penalty when action are initialy not between -0.9 and 0.9 
+        if (abs(forward) > 0.95 or abs(lateral) > 0.95 or abs(rotation) > 0.95):
+            reward -= 5
+        else : 
+            print("actions in range")
         return reward
 
 
@@ -147,9 +163,9 @@ class MyDroneHulk(DroneAbstract):
     def update_map_pose_speed(self):
         
         if self.timestep_count == 1: # first iteration
-            print("Starting control")
+            # print("Starting control")
             start_x, start_y = self.measured_gps_position() # never none ? 
-            print(f"Initial position: {start_x}, {start_y}")
+            # print(f"Initial position: {start_x}, {start_y}")
             self.grid.set_initial_cell(start_x, start_y)
         
 
@@ -240,12 +256,12 @@ def compute_returns(rewards):
     return returns
 
 def optimize_batch(states_maps,states_vectors, actions, returns, batch_size=8, entropy_beta=0.1):
-    states_maps = np.array(states_maps, dtype=np.float32)
-    states_vectors = np.array(states_vectors, dtype=np.float32)
+    states_maps = np.array(states_maps, dtype=np.float32).squeeze()
+    states_vectors = np.array(states_vectors, dtype=np.float32).squeeze()
     actions = np.array(actions, dtype=np.float32)
     returns = np.array(returns, dtype=np.float32)
 
-    dataset_size = len(states_map)
+    dataset_size = len(states_maps)
     for start_idx in range(0, dataset_size, batch_size):
         end_idx = min(start_idx + batch_size, dataset_size)
 
@@ -266,6 +282,8 @@ def optimize_batch(states_maps,states_vectors, actions, returns, batch_size=8, e
         stds = torch.exp(log_stds)
         log_probs_continuous = -0.5 * (((actions_batch - means) / (stds + 1e-8)) ** 2 + 2 * log_stds + math.log(2 * math.pi))
         log_probs_continuous = log_probs_continuous.sum(dim=1)
+
+        log_probs_continuous = log_probs_continuous - torch.sum(torch.log(1 - actions_batch ** 2 + 1e-6), dim=1)
 
         # # Discrete action log probabilities
         # discrete_action_prob = torch.sigmoid(discrete_logits).squeeze()
@@ -315,16 +333,24 @@ def select_action(policy, state_map,state_vector):
     sampled_continuous_actions = means + torch.randn_like(means) * stds
 
     # Clamp continuous actions to valid range
-    continuous_actions = torch.clamp(sampled_continuous_actions, -1.0, 1.0)
-
+    # print(f"actions before tanh: {sampled_continuous_actions}")
+    continuous_actions = torch.tanh(sampled_continuous_actions)
+    # print(f"actions after tanh: {continuous_actions}")
+    
     # Compute log probabilities for continuous actions
+    # log prob with tanh squashing
     log_probs_continuous = -0.5 * (((sampled_continuous_actions - means) / (stds + 1e-8)) ** 2 + 2 * log_stds + math.log(2 * math.pi))
     log_probs_continuous = log_probs_continuous.sum(dim=1)
 
+    log_probs_continuous = log_probs_continuous - torch.sum(torch.log(1 - continuous_actions ** 2 + 1e-6), dim=1)
+
+
+    
+    
 
     # Combine actions
     action = continuous_actions[0]
-    print(action)
+
     log_prob = log_probs_continuous 
     return action.detach().cpu(), log_prob
 
@@ -335,8 +361,11 @@ def train():
     rewards_per_episode = []
 
     for episode in range(NB_EPISODES):
-        
+        # reinintialisation de la map pour chaque drone à chaque épisode
+
         playground.reset()
+        for drone in map_training.drones:
+            drone.grid.reset()
         #gui = GuiSR(playground=playground, the_map=map_training, draw_semantic_rays=True)
         done = False
         states_map,states_vector, actions, rewards = [], [], [],[]
@@ -350,7 +379,9 @@ def train():
             step += 1
             # gui.run()  # Run GUI for visualization
             for drone in map_training.drones:
+                
                 drone.timestep_count = step
+                drone.showMaps(display_zoomed_position_grid=True,display_zoomed_grid=True)
                 # maps is the occupation map and the position map as a tensor of shape (1, 2, h, w)
                 maps = torch.tensor([drone.grid.grid, drone.grid.position_grid], dtype=torch.float32, device=device).unsqueeze(0)
                 global_state = torch.tensor([drone.estimated_pose.position[0], drone.estimated_pose.position[1], drone.estimated_pose.orientation, drone.estimated_pose.vitesse_X, drone.estimated_pose.vitesse_Y, drone.estimated_pose.vitesse_angulaire], dtype=torch.float32, device=device).unsqueeze(0)
@@ -369,11 +400,10 @@ def train():
             for drone in map_training.drones:
                 
                 drone.update_map_pose_speed() # conséquence de l'action
-                
                 found_wounded = drone.process_semantic_sensor()
                 min_dist = drone.process_lidar_sensor(drone.lidar())
                 is_collision = min_dist < 10
-                reward = drone.compute_reward(is_collision, found_wounded, 1)
+                reward = drone.compute_reward(is_collision, found_wounded, 1,actions_drones[drone])
                 
                 
                 rewards.append(reward)
@@ -396,14 +426,13 @@ def train():
 
         del states_map,states_vector, actions, rewards
 
-        if episode % 100 == 1:
-            print(f"Episode {episode}, Reward: {total_reward}, Mean Last 100 Rewards: {np.mean(rewards_per_episode[-100:])}")
-            print(map_training.drones[0].occupancy_grid.visited_zones)
+        if episode % 5 == 1:
+            print(f"Episode {episode}, Reward: {total_reward}, Mean Last 100 Rewards: {np.mean(rewards_per_episode[-5:])}")
             torch.save(policy_net.state_dict(), 'policy_net.pth')
             torch.save(value_net.state_dict(), 'value_net.pth')
             
 
-        if np.mean(rewards_per_episode[-100:]) > 10000:
+        if np.mean(rewards_per_episode[-5:]) > 10000:
             print(f"Training solved in {episode} episodes!")
             break
 

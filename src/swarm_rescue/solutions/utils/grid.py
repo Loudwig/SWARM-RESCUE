@@ -38,11 +38,20 @@ class OccupancyGrid(Grid):
         self.grid_previous_score = 0
         self.exploration_score = 0
     
+    def reset(self):
+        self.grid = np.zeros((self.x_max_grid, self.y_max_grid))
+        self.position_grid = np.zeros((self.x_max_grid, self.y_max_grid))
+        self.grid_score = 0
+        self.grid_previous_score = 0
+        self.exploration_score = 0
+        self.zoomed_grid = np.empty((self.x_max_grid, self.y_max_grid))
+        self.zoomed_position_grid = np.empty((self.x_max_grid, self.y_max_grid))
+
     def compute_grid_score(self):
         """
         Compute the score of the grid
         """
-        seuil = 0.2
+        seuil = 0.1
         self.grid_score = np.sum(abs(self.grid) >= seuil) 
         # self.grid_score /= self.x_max_grid * self.y_max_grid
 
