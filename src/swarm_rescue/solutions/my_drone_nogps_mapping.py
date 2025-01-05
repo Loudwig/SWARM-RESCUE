@@ -46,7 +46,7 @@ class OccupancyGrid(Grid):
 
         self.grid = np.zeros((self.x_max_grid, self.y_max_grid))
         self.zoomed_grid = np.empty((self.x_max_grid, self.y_max_grid))
-
+        print(f"Grid size: {self.x_max_grid} x {self.y_max_grid}")
     def set_initial_cell(self, world_x, world_y):
         """
         Store the cell that corresponds to the initial drone position 

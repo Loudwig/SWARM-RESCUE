@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class NetworkValue(nn.Module):
-    def __init__(self, map_channels= 2,h =108,w = 64,cnn_output_dim = 64,global_state_dim = 6,hidden_size = 32,num_actions = 3):
+    def __init__(self, map_channels= 2,h =100,w = 63,cnn_output_dim = 64,global_state_dim = 6,hidden_size = 32,num_actions = 3):
         super(NetworkValue, self).__init__()
         self.cnn = nn.Sequential(
             nn.Conv2d(map_channels, 16, kernel_size=3, stride=1, padding=1),
@@ -21,10 +21,10 @@ class NetworkValue(nn.Module):
             cnn_flatten_size = dummy_output.numel()
 
         # on projete ce flatten vers un 
-        self.fc_cnn = nn.Linear(cnn_flatten_size, self.cnn_output_dim)
+        self.fc_cnn = nn.Linear(cnn_flatten_size, cnn_output_dim)
 
         # MLP final 
-        mlp_input_dim = self.cnn_output_dim + global_state_dim
+        mlp_input_dim = cnn_output_dim + global_state_dim
         
         self.mlp = nn.Sequential(
             nn.Linear(mlp_input_dim, hidden_size),
