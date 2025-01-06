@@ -51,22 +51,6 @@ class MyDroneHulk(DroneAbstract):
                                   lidar=self.lidar())
     
 
-        # try : 
-                
-        #     self.policy_model_path = "solutions/utils/trained_models/policy_net.pth"
-        #     self.value_model_path = "solutions/utils/trained_models/value_net.pth"
-        #     self.policy_net = NetworkPolicy(h=self.grid.grid.shape[0],w=self.grid.grid.shape[1])
-        #     self.value_net = NetworkValue(h=self.grid.grid.shape[0],w=self.grid.grid.shape[1])
-        #     self.policy_net.load_state_dict(torch.load(self.policy_model_path))
-        #     self.value_net.load_state_dict(torch.load(self.value_model_path))
-        #     # self.policy_net.to(device)
-        #     # self.value_net.to(device)
-        #     print("Model loaded successfully")
-    
-        # except :
-        #print("No model found, using default policy and value networks")
-        self.policy_net = NetworkPolicy(h=self.grid.grid.shape[0],w=self.grid.grid.shape[1])
-        self.value_net = NetworkValue(h=self.grid.grid.shape[0],w=self.grid.grid.shape[1])
 
         self.display_map = True # Display the probability map during the simulation
 
@@ -96,14 +80,7 @@ class MyDroneHulk(DroneAbstract):
         pass
 
     def control(self):
-        self.timestep_count +=1 
-        self.update_map_pose_speed()
-        # print( f"EXPLORATION SCORE : {self.grid.exploration_score}")
-        maps = torch.tensor([self.grid.grid, self.grid.position_grid], dtype=torch.float32, device=device).unsqueeze(0)
-        global_state = torch.tensor([self.estimated_pose.position[0], self.estimated_pose.position[1], self.estimated_pose.orientation, self.estimated_pose.vitesse_X, self.estimated_pose.vitesse_Y, self.estimated_pose.vitesse_angulaire], dtype=torch.float32, device=device).unsqueeze(0)
-        action,_ = self.select_action(maps,global_state)
-        command = self.process_actions(action)
-        return command
+        pass
 
     def process_semantic_sensor(self):
         semantic_values = self.semantic_values()

@@ -88,11 +88,11 @@ def optimize_batch(optimizer_value,optimizer_policy,policy_net,value_net,states_
 
 
         # Policy loss
-        policy_loss = -(log_probs * advantages).mean()
+        policy_loss = -(log_probs * advantages).mean()/100
 
         # Entropy regularization
         max_action_value = 1.0  # Assuming actions are in the range [-1, 1]
-        penalty_weight = 1000  # Weight for the penalty term
+        penalty_weight = 10000  # Weight for the penalty term
         action_penalty = penalty_weight * torch.sum(torch.clamp(actions_batch.abs() - (max_action_value - 0.1), min=0) ** 2)
 
         entropy_loss = -entropy_beta * (log_stds + 0.5 * math.log(2 * math.pi * math.e)).sum(dim=1).mean()
@@ -172,13 +172,7 @@ def train():
     policy_net.apply(lambda m: m.reset_parameters() if hasattr(m, 'reset_parameters') else None)
 
     rewards_per_episode = []
-    for drone in map_training.drones:
-        
-        # On écrase les poids potentiellement loader ou bien on initialise les networks
-        drone.policy_net = policy_net
-        drone.value_net = value_net
-
-
+    
     for episode in range(NB_EPISODES):
         # reinintialisation de la map pour chaque drone à chaque épisode
 
