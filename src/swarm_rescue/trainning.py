@@ -30,10 +30,10 @@ from solutions.utils.NetworkValue import NetworkValue
 from solutions.my_drone_A2C_trainning import MyDroneHulk
 
 GAMMA = 0.9
-LEARNING_RATE = 2e-5
+LEARNING_RATE = 5e-6
 ENTROPY_BETA = 0.1
 NB_EPISODES = 600
-MAX_STEPS = 100
+MAX_STEPS = 120
 
 LossValue = []
 LossPolicy = []
@@ -84,7 +84,8 @@ def optimize_batch(optimizer_value,optimizer_policy,policy_net,value_net,states_
 
         # Compute advantages
         advantages = returns_batch - values.detach()
-        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+        if advantages.numel() > 1:
+            advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
 
         # Policy loss
