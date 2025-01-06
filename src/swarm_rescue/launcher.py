@@ -29,9 +29,8 @@ from solutions.my_drone_basic_mapping import MyDroneBasic
 from solutions.my_drone_nogps_mapping import MyDroneNoGps
 from solutions.my_drone_A2C import MyDroneHulk
 
-print("Launcher loaded")
 
-class MyDrone(MyDroneNoGps):
+class MyDrone(MyDroneHulk):
     pass
 
 
