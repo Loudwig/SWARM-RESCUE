@@ -51,7 +51,7 @@ class OccupancyGrid(Grid):
         """
         Compute the score of the grid
         """
-        seuil = 0.1
+        seuil = 0.2
         self.grid_score = np.sum(abs(self.grid) >= seuil) 
         # self.grid_score /= self.x_max_grid * self.y_max_grid
 

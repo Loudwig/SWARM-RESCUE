@@ -42,20 +42,6 @@ class MyDroneHulk(DroneAbstract):
         
         # Par défaut on load un model. Si on veut l'entrainer il faut redefinir policy net et value net        
         # Si model enregistré
-        try : 
-            
-            self.policy_model_path = "src/swarm_rescue/solutions/utils/policy_model.pth"
-            self.value_model_path = "src/swarm_rescue/solutions/utils/value_model.pth"
-            self.policy_net = policy_net.load_state_dict(torch.load(self.policy_model_path))
-            self.value_net = value_net.load_state_dict(torch.load(self.value_model_path))
-            self.policy_net.to(device)
-            self.value_net.to(device)
-            print("Model loaded successfully")
-        
-        except :
-            print("No model found, using default policy and value networks")
-            self.policy_net = NetworkPolicy()
-            self.value_net = NetworkValue()
             
         # MAPING
         self.estimated_pose = Pose() # Fonctionne commant sans le GPS ?  erreur ou qu'est ce que cela retourne ? 
@@ -64,6 +50,24 @@ class MyDroneHulk(DroneAbstract):
                                   resolution=resolution,
                                   lidar=self.lidar())
     
+
+        # try : 
+                
+        #     self.policy_model_path = "solutions/utils/trained_models/policy_net.pth"
+        #     self.value_model_path = "solutions/utils/trained_models/value_net.pth"
+        #     self.policy_net = NetworkPolicy(h=self.grid.grid.shape[0],w=self.grid.grid.shape[1])
+        #     self.value_net = NetworkValue(h=self.grid.grid.shape[0],w=self.grid.grid.shape[1])
+        #     self.policy_net.load_state_dict(torch.load(self.policy_model_path))
+        #     self.value_net.load_state_dict(torch.load(self.value_model_path))
+        #     # self.policy_net.to(device)
+        #     # self.value_net.to(device)
+        #     print("Model loaded successfully")
+    
+        # except :
+        #print("No model found, using default policy and value networks")
+        self.policy_net = NetworkPolicy(h=self.grid.grid.shape[0],w=self.grid.grid.shape[1])
+        self.value_net = NetworkValue(h=self.grid.grid.shape[0],w=self.grid.grid.shape[1])
+
         self.display_map = True # Display the probability map during the simulation
 
         # POSTION 
@@ -92,13 +96,14 @@ class MyDroneHulk(DroneAbstract):
         pass
 
     def control(self):
-        print("Control")
         self.timestep_count +=1 
         self.update_map_pose_speed()
+        # print( f"EXPLORATION SCORE : {self.grid.exploration_score}")
         maps = torch.tensor([self.grid.grid, self.grid.position_grid], dtype=torch.float32, device=device).unsqueeze(0)
         global_state = torch.tensor([self.estimated_pose.position[0], self.estimated_pose.position[1], self.estimated_pose.orientation, self.estimated_pose.vitesse_X, self.estimated_pose.vitesse_Y, self.estimated_pose.vitesse_angulaire], dtype=torch.float32, device=device).unsqueeze(0)
         action,_ = self.select_action(maps,global_state)
-        return self.process_actions(action)
+        command = self.process_actions(action)
+        return command
 
     def process_semantic_sensor(self):
         semantic_values = self.semantic_values()
@@ -147,10 +152,10 @@ class MyDroneHulk(DroneAbstract):
         reward -= time_penalty
 
         # give penalty when action are initialy not between -0.9 and 0.9 
-        if (abs(forward) > 0.95 and abs(lateral) > 0.95 and abs(rotation) > 0.95):
-            reward -= 5
-        else : 
+        if (abs(forward) < 0.95 and abs(lateral) < 0.95 and abs(rotation) < 0.95):
             print("actions in range")
+            
+            
         
         return reward
 
@@ -252,13 +257,12 @@ class MyDroneHulk(DroneAbstract):
         stds = torch.exp(log_stds)
         sampled_continuous_actions = means + torch.randn_like(means) * stds
 
-        # Clamp continuous actions to valid range
         # print(f"actions before tanh: {sampled_continuous_actions}")
         continuous_actions = torch.tanh(sampled_continuous_actions)
         # print(f"actions after tanh: {continuous_actions}")
         
-        # Compute log probabilities for continuous actions
-        # log prob with tanh squashing
+        # Compute log probabilities 
+        # log prob with tanh squashing and gaussian prob
         log_probs_continuous = -0.5 * (((sampled_continuous_actions - means) / (stds + 1e-8)) ** 2 + 2 * log_stds + math.log(2 * math.pi))
         log_probs_continuous = log_probs_continuous.sum(dim=1)
 
@@ -266,7 +270,12 @@ class MyDroneHulk(DroneAbstract):
 
         # Combine actions
         action = continuous_actions[0]
-
+        #print(f"action: {action}")
+        
+        if torch.isnan(action).any():
+            print("NaN detected in action")
+            return [0, 0, 0], None
+        
         log_prob = log_probs_continuous 
         return action.detach().cpu(), log_prob
 

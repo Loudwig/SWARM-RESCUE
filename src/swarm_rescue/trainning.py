@@ -10,10 +10,10 @@ import sys
 from pathlib import Path
 import torch.nn as nn
 import torch.optim as optim
+import matplotlib.pyplot as plt
 
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from maps.map_intermediate_01 import MyMapIntermediate01 as M1
 from spg_overlay.utils.constants import MAX_RANGE_LIDAR_SENSOR
 from spg_overlay.entities.drone_abstract import DroneAbstract
@@ -27,20 +27,22 @@ from solutions.utils.grid import OccupancyGrid
 from solutions.utils.astar import *
 from solutions.utils.NetworkPolicy import NetworkPolicy
 from solutions.utils.NetworkValue import NetworkValue
-from solutions.my_drone_A2C import MyDroneHulk
+from solutions.my_drone_A2C_trainning import MyDroneHulk
 
-GAMMA = 0.99
-LEARNING_RATE = 1e-4
+GAMMA = 0.9
+LEARNING_RATE = 2e-5
 ENTROPY_BETA = 0.1
 NB_EPISODES = 600
-MAX_STEPS = 100
+MAX_STEPS = 120
 
+LossValue = []
+LossPolicy = []
+LossEntropy = []
+LossOutbound = []
+LossWeightsValue = []
+LossExploration = []
+LossWeightsPolicy = []
 
-policy_net = NetworkPolicy()  
-value_net = NetworkValue()
-optimizer_policy = optim.Adam(policy_net.parameters(), lr=LEARNING_RATE)
-optimizer_value = optim.Adam(value_net.parameters(), lr=LEARNING_RATE)
-policy_net.apply(lambda m: m.reset_parameters() if hasattr(m, 'reset_parameters') else None)
 
 
 def compute_returns(rewards):
@@ -51,7 +53,7 @@ def compute_returns(rewards):
         returns.insert(0, g)
     return returns
 
-def optimize_batch(states_maps,states_vectors, actions, returns, batch_size=8, entropy_beta=0.1):
+def optimize_batch(optimizer_value,optimizer_policy,policy_net,value_net,states_maps,states_vectors, actions, returns, batch_size=8, entropy_beta=0.1):
     states_maps = np.array(states_maps, dtype=np.float32).squeeze()
     states_vectors = np.array(states_vectors, dtype=np.float32).squeeze()
     actions = np.array(actions, dtype=np.float32)
@@ -70,37 +72,51 @@ def optimize_batch(states_maps,states_vectors, actions, returns, batch_size=8, e
         means, log_stds = policy_net(states_map_batch, states_vector_batch)
         values = value_net(states_map_batch,states_vector_batch).squeeze()
 
-        # # Separate continuous and discrete actions
-        # continuous_actions_t = actions_batch[:, :3]
-        # discrete_actions_t = actions_batch[:, 3].long()
-
         # Continuous action log probabilities
         stds = torch.exp(log_stds)
         log_probs_continuous = -0.5 * (((actions_batch - means) / (stds + 1e-8)) ** 2 + 2 * log_stds + math.log(2 * math.pi))
         log_probs_continuous = log_probs_continuous.sum(dim=1)
-
         log_probs_continuous = log_probs_continuous - torch.sum(torch.log(1 - actions_batch ** 2 + 1e-6), dim=1)
 
-        # # Discrete action log probabilities
-        # discrete_action_prob = torch.sigmoid(discrete_logits).squeeze()
-        # log_probs_discrete = torch.log(discrete_action_prob + 1e-8) * discrete_actions_t + \
-        #                      torch.log(1 - discrete_action_prob + 1e-8) * (1 - discrete_actions_t)
-
+        
         # # Total log probabilities
         log_probs = log_probs_continuous 
 
         # Compute advantages
         advantages = returns_batch - values.detach()
+        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+
 
         # Policy loss
         policy_loss = -(log_probs * advantages).mean()
 
         # Entropy regularization
+        max_action_value = 1.0  # Assuming actions are in the range [-1, 1]
+        penalty_weight = 1000  # Weight for the penalty term
+        action_penalty = penalty_weight * torch.sum(torch.clamp(actions_batch.abs() - (max_action_value - 0.1), min=0) ** 2)
+
         entropy_loss = -entropy_beta * (log_stds + 0.5 * math.log(2 * math.pi * math.e)).sum(dim=1).mean()
         total_policy_loss = policy_loss + entropy_loss
 
         # Value loss
         value_loss = nn.functional.mse_loss(values, returns_batch)
+
+        # L2 regularization (weight decay)
+        l2_lambda = 1e-1  # Regularization strength
+        l2_policy_loss = sum(param.pow(2.0).sum() for param in policy_net.parameters())
+        l2_value_loss = sum(param.pow(2.0).sum() for param in value_net.parameters())
+
+        # Add L2 regularization to the losses
+        total_policy_loss += l2_lambda * l2_policy_loss
+        value_loss += l2_lambda * l2_value_loss
+
+        LossPolicy.append(total_policy_loss.item())
+        LossValue.append(value_loss.item())
+        LossEntropy.append(entropy_loss.item())
+        LossOutbound.append(action_penalty.item())
+        LossWeightsPolicy.append(l2_lambda* l2_policy_loss.item())
+        LossExploration.append(policy_loss.item())
+        LossWeightsValue.append(l2_lambda* l2_value_loss.item())
 
         # Backpropagation
         optimizer_policy.zero_grad()
@@ -117,12 +133,20 @@ def train():
     print("Training...")
     map_training = M1()
     playground = map_training.construct_playground(drone_type=MyDroneHulk)
+    policy_net = NetworkPolicy(h=map_training.drones[0].grid.grid.shape[0],w=map_training.drones[0].grid.grid.shape[1])
+    value_net = NetworkValue(h=map_training.drones[0].grid.grid.shape[0],w=map_training.drones[0].grid.grid.shape[1])
+
+    optimizer_policy = optim.Adam(policy_net.parameters(), lr=LEARNING_RATE)
+    optimizer_value = optim.Adam(value_net.parameters(), lr=LEARNING_RATE)
+    policy_net.apply(lambda m: m.reset_parameters() if hasattr(m, 'reset_parameters') else None)
+
     rewards_per_episode = []
     for drone in map_training.drones:
         
         # On écrase les poids potentiellement loader ou bien on initialise les networks
         drone.policy_net = policy_net
         drone.value_net = value_net
+
 
     for episode in range(NB_EPISODES):
         # reinintialisation de la map pour chaque drone à chaque épisode
@@ -185,15 +209,68 @@ def train():
         
         # Optimize the policy and value networks in batches
         returns = compute_returns(rewards)
-        optimize_batch(states_map,states_vector, actions, returns, batch_size=8)
+        optimize_batch(optimizer_value,optimizer_policy,policy_net,value_net,states_map,states_vector, actions, returns, batch_size=8)
         rewards_per_episode.append(total_reward)
 
         del states_map,states_vector, actions, rewards
 
         if episode % 5 == 1:
+            
             print(f"Episode {episode}, Reward: {total_reward}, Mean Last 5 Rewards: {np.mean(rewards_per_episode[-5:])}")
-            torch.save(policy_net.state_dict(), 'src/swarm_rescue/solutions/utils/trained_models/policy_net.pth')
-            torch.save(value_net.state_dict(), 'src/swarm_rescue/solutions/utils/trained_models/value_net.pth')
+            torch.save(policy_net.state_dict(), 'solutions/utils/trained_models/policy_net.pth')
+            torch.save(value_net.state_dict(), 'solutions/utils/trained_models/value_net.pth')
+            
+            plot = False
+            
+            # Plot the losses
+            if plot or episode % 70 ==1:
+                plt.figure(figsize=(14, 7))
+                
+                plt.subplot(2, 3, 1)
+                plt.plot(LossPolicy)
+                plt.title('Policy Loss')
+                plt.xlabel('Training Steps')
+                plt.ylabel('Loss')
+                plt.grid()
+
+                plt.subplot(2, 3, 2)
+                plt.plot(LossValue)
+                plt.title('Value Loss')
+                plt.xlabel('Training Steps')
+                plt.ylabel('Loss')
+                plt.grid()
+
+                plt.subplot(2, 3, 3)
+                plt.plot(LossEntropy)
+                plt.title('Entropy Loss')
+                plt.xlabel('Training Steps')
+                plt.ylabel('Loss')
+                plt.grid()
+
+                plt.subplot(2, 3, 4)
+                plt.plot(LossOutbound)
+                plt.title('Outbound Loss')
+                plt.xlabel('Training Steps')
+                plt.ylabel('Loss')
+                plt.grid()
+
+                plt.subplot(2, 3, 5)
+                plt.plot(LossWeightsPolicy)
+                plt.title('Weights Policy Loss')
+                plt.xlabel('Training Steps')
+                plt.ylabel('Loss')
+                plt.grid()
+
+                plt.subplot(2, 3, 6)
+                plt.plot(LossExploration)
+                plt.title('Exploration Loss')
+                plt.xlabel('Training Steps')
+                plt.ylabel('Loss')
+                plt.grid()
+
+                plt.tight_layout()
+                plt.show()
+
             
         if np.mean(rewards_per_episode[-5:]) > 10000:
             print(f"Training solved in {episode} episodes!")
