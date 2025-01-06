@@ -33,7 +33,7 @@ GAMMA = 0.9
 LEARNING_RATE = 2e-5
 ENTROPY_BETA = 0.1
 NB_EPISODES = 600
-MAX_STEPS = 120
+MAX_STEPS = 100
 
 LossValue = []
 LossPolicy = []
