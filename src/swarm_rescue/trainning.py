@@ -127,6 +127,37 @@ def optimize_batch(optimizer_value,optimizer_policy,policy_net,value_net,states_
         value_loss.backward()
         optimizer_value.step()
 
+def select_action(policy_net, state_map,state_vector):
+        
+        state_map = torch.FloatTensor(state_map).to(device)
+        state_vector = torch.FloatTensor(state_vector).to(device)
+        means, log_stds = policy_net(state_map,state_vector)
+
+        # Sample continuous actions
+        stds = torch.exp(log_stds)
+        sampled_continuous_actions = means + torch.randn_like(means) * stds
+
+        # print(f"actions before tanh: {sampled_continuous_actions}")
+        continuous_actions = torch.tanh(sampled_continuous_actions)
+        # print(f"actions after tanh: {continuous_actions}")
+        
+        # Compute log probabilities 
+        # log prob with tanh squashing and gaussian prob
+        log_probs_continuous = -0.5 * (((sampled_continuous_actions - means) / (stds + 1e-8)) ** 2 + 2 * log_stds + math.log(2 * math.pi))
+        log_probs_continuous = log_probs_continuous.sum(dim=1)
+
+        log_probs_continuous = log_probs_continuous - torch.sum(torch.log(1 - continuous_actions ** 2 + 1e-6), dim=1)
+
+        # Combine actions
+        action = continuous_actions[0]
+        #print(f"action: {action}")
+        
+        if torch.isnan(action).any():
+            print("NaN detected in action")
+            return [0, 0, 0], None
+        
+        log_prob = log_probs_continuous 
+        return action.detach().cpu(), log_prob
 
 
 def train():
@@ -179,7 +210,7 @@ def train():
                 states_vector.append(global_state)
 
 
-                action, _ = drone.select_action(maps, global_state)
+                action, _ = select_action(policy_net,maps, global_state)
                 actions_drones[drone] = drone.process_actions(action)
                 actions.append(action)
 
