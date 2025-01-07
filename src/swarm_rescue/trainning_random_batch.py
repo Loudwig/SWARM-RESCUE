@@ -29,6 +29,25 @@ from solutions.utils.NetworkPolicy import NetworkPolicy
 from solutions.utils.NetworkValue import NetworkValue
 from solutions.my_drone_A2C_trainning import MyDroneHulk
 
+from torch.utils.data import Dataset, DataLoader
+
+class DroneDataset(Dataset):
+    def __init__(self, states_maps, states_vectors, actions, returns):
+        # Convert lists to tensors
+        self.states_maps = torch.stack([torch.FloatTensor(s).squeeze(0) for s in states_maps])
+        self.states_vectors = torch.stack([torch.FloatTensor(s).squeeze(0) for s in states_vectors])
+        self.actions = torch.stack([torch.FloatTensor(a) for a in actions])
+        self.returns = torch.FloatTensor(returns)
+
+    def __len__(self):
+        return len(self.returns)
+
+    def __getitem__(self, idx):
+        return (self.states_maps[idx], 
+                self.states_vectors[idx], 
+                self.actions[idx], 
+                self.returns[idx])
+
 GAMMA = 0.99
 LEARNING_RATE = 5e-6
 ENTROPY_BETA = 0.1
@@ -53,80 +72,78 @@ def compute_returns(rewards):
         returns.insert(0, g)
     return returns
 
-def optimize_batch(optimizer_value,optimizer_policy,policy_net,value_net,states_maps,states_vectors, actions, returns, batch_size=8, entropy_beta=0.1):
-    states_maps = np.array(states_maps, dtype=np.float32).squeeze()
-    states_vectors = np.array(states_vectors, dtype=np.float32).squeeze()
-    actions = np.array(actions, dtype=np.float32)
-    returns = np.array(returns, dtype=np.float32)
+def optimize_batch(states_map_batch, states_vector_batch, actions_batch, returns_batch, 
+                  policy_net, value_net, optimizer_policy, optimizer_value, device):
+    # Move tensors to device and ensure proper dimensions
+    states_map_batch = states_map_batch.to(device)
+    states_vector_batch = states_vector_batch.to(device)
+    actions_batch = actions_batch.to(device)
+    returns_batch = returns_batch.to(device)
 
-    dataset_size = len(states_maps)
-    for start_idx in range(0, dataset_size, batch_size):
-        end_idx = min(start_idx + batch_size, dataset_size)
+    # Forward pass
+    means, log_stds = policy_net(states_map_batch, states_vector_batch)
+    values = value_net(states_map_batch, states_vector_batch).squeeze()
 
-        states_map_batch = torch.tensor(states_maps[start_idx:end_idx], device=device)
-        states_vector_batch = torch.tensor(states_vectors[start_idx:end_idx], device=device)
-        actions_batch = torch.tensor(actions[start_idx:end_idx], device=device)
-        returns_batch = torch.tensor(returns[start_idx:end_idx], device=device)
+    # Ensure proper dimensions for values
+    if values.dim() == 0:
+        values = values.unsqueeze(0)
+    if returns_batch.dim() == 0:
+        returns_batch = returns_batch.unsqueeze(0)
 
-        # Forward pass
-        means, log_stds = policy_net(states_map_batch, states_vector_batch)
-        values = value_net(states_map_batch,states_vector_batch).squeeze()
+    # Continuous action log probabilities with error checking
+    stds = torch.exp(log_stds.clamp(min=-20, max=2))  # Prevent numerical instability
+    log_probs_continuous = -0.5 * (((actions_batch - means) / (stds + 1e-8)) ** 2 + 2 * log_stds + math.log(2 * math.pi))
+    log_probs_continuous = log_probs_continuous.sum(dim=1)
+    
+    # Safer tanh correction term
+    tanh_correction = torch.sum(torch.log(1 - actions_batch.pow(2) + 1e-6), dim=1)
+    log_probs = log_probs_continuous - tanh_correction
 
-        # Continuous action log probabilities
-        stds = torch.exp(log_stds)
-        log_probs_continuous = -0.5 * (((actions_batch - means) / (stds + 1e-8)) ** 2 + 2 * log_stds + math.log(2 * math.pi))
-        log_probs_continuous = log_probs_continuous.sum(dim=1)
-        log_probs_continuous = log_probs_continuous - torch.sum(torch.log(1 - actions_batch ** 2 + 1e-6), dim=1)
+    # Compute advantages with proper normalization
+    advantages = returns_batch - values.detach()
+    if advantages.numel() > 1:
+        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
-        
-        # # Total log probabilities
-        log_probs = log_probs_continuous 
+    # Policy loss with proper scaling
+    policy_loss = -(log_probs * advantages).mean()
 
-        # Compute advantages
-        advantages = returns_batch - values.detach()
-        if advantages.numel() > 1:
-            advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+    # Action penalty with proper clamping
+    max_action_value = 1.0
+    penalty_weight = 0.1  # Reduced from 10000 to prevent overshadowing other losses
+    action_penalty = penalty_weight * torch.sum(torch.clamp(actions_batch.abs() - (max_action_value - 0.1), min=0) ** 2)
 
+    # Entropy regularization
+    entropy_loss = -ENTROPY_BETA * (log_stds + 0.5 * math.log(2 * math.pi * math.e)).sum(dim=1).mean()
+    total_policy_loss = policy_loss + entropy_loss
 
-        # Policy loss
-        policy_loss = -(log_probs * advantages).mean()/100
+    # Value loss
+    value_loss = nn.functional.mse_loss(values, returns_batch)
 
-        # Entropy regularization
-        max_action_value = 1.0  # Assuming actions are in the range [-1, 1]
-        penalty_weight = 10000  # Weight for the penalty term
-        action_penalty = penalty_weight * torch.sum(torch.clamp(actions_batch.abs() - (max_action_value - 0.1), min=0) ** 2)
+    # L2 regularization (weight decay)
+    l2_lambda = 1e-1  # Regularization strength
+    l2_policy_loss = sum(param.pow(2.0).sum() for param in policy_net.parameters())
+    l2_value_loss = sum(param.pow(2.0).sum() for param in value_net.parameters())
 
-        entropy_loss = -entropy_beta * (log_stds + 0.5 * math.log(2 * math.pi * math.e)).sum(dim=1).mean()
-        total_policy_loss = policy_loss + entropy_loss
+    # Add L2 regularization to the losses
+    total_policy_loss += l2_lambda * l2_policy_loss
+    value_loss += l2_lambda * l2_value_loss
 
-        # Value loss
-        value_loss = nn.functional.mse_loss(values, returns_batch)
+    LossPolicy.append(total_policy_loss.item())
+    LossValue.append(value_loss.item())
+    LossEntropy.append(entropy_loss.item())
+    LossOutbound.append(action_penalty.item())
+    LossWeightsPolicy.append(l2_lambda* l2_policy_loss.item())
+    LossExploration.append(policy_loss.item())
+    LossWeightsValue.append(l2_lambda* l2_value_loss.item())
 
-        # L2 regularization (weight decay)
-        l2_lambda = 1e-1  # Regularization strength
-        l2_policy_loss = sum(param.pow(2.0).sum() for param in policy_net.parameters())
-        l2_value_loss = sum(param.pow(2.0).sum() for param in value_net.parameters())
+    # Backpropagation
+    optimizer_policy.zero_grad()
+    total_policy_loss.backward()
+    optimizer_policy.step()
 
-        # Add L2 regularization to the losses
-        total_policy_loss += l2_lambda * l2_policy_loss
-        value_loss += l2_lambda * l2_value_loss
-
-        LossPolicy.append(total_policy_loss.item())
-        LossValue.append(value_loss.item())
-        LossEntropy.append(entropy_loss.item())
-        LossOutbound.append(action_penalty.item())
-        LossWeightsPolicy.append(l2_lambda* l2_policy_loss.item())
-        LossExploration.append(policy_loss.item())
-        LossWeightsValue.append(l2_lambda* l2_value_loss.item())
-
-        # Backpropagation
-        optimizer_policy.zero_grad()
-        total_policy_loss.backward()
-        optimizer_policy.step()
-
-        optimizer_value.zero_grad()
-        value_loss.backward()
-        optimizer_value.step()
+    optimizer_value.zero_grad()
+    value_loss.backward()
+    optimizer_value.step()
 
 def select_action(policy_net, state_map,state_vector):
         
@@ -218,8 +235,6 @@ def train():
                 min_dist = drone.process_lidar_sensor(drone.lidar())
                 is_collision = min_dist < 10
                 reward = drone.compute_reward(is_collision, found_wounded, 1,actions_drones[drone])
-                
-                
                 rewards.append(reward)
                 total_reward += reward
 
@@ -235,8 +250,13 @@ def train():
         
         # Optimize the policy and value networks in batches
         returns = compute_returns(rewards)
-        optimize_batch(optimizer_value,optimizer_policy,policy_net,value_net,states_map,states_vector, actions, returns, batch_size=8)
         rewards_per_episode.append(total_reward)
+
+        dataset = DroneDataset(states_map, states_vector, actions, returns)
+        data_loader = DataLoader(dataset, batch_size=8, shuffle=True)
+        for batch in data_loader:
+            states_map_b, states_vector_b, actions_b, returns_b = batch
+            optimize_batch(states_map_b, states_vector_b, actions_b, returns_b, policy_net, value_net, optimizer_policy, optimizer_value, device)
 
         del states_map,states_vector, actions, rewards
 
