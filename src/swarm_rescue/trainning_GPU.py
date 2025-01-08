@@ -16,7 +16,7 @@ import os
 import csv
 
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+device = torch.device('cuda:2' if torch.cuda.is_available() else 'cpu')
 from maps.map_intermediate_01 import MyMapIntermediate01 as M1
 from spg_overlay.utils.constants import MAX_RANGE_LIDAR_SENSOR
 from spg_overlay.entities.drone_abstract import DroneAbstract
@@ -34,7 +34,7 @@ from solutions.my_drone_A2C_trainning import MyDroneHulk
 
 from torch.utils.data import Dataset, DataLoader
 
-torch.set_default_device("cuda")
+torch.set_default_device("cuda:2")
 
 
 class DroneDataset(Dataset):
@@ -207,7 +207,7 @@ def train(n_frames_stack=4):
 
     map_training = M1()
     playground = map_training.construct_playground(drone_type=MyDroneHulk)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda:2" if torch.cuda.is_available() else "cpu")
     print("Using device:", device)
     policy_net = NetworkPolicy(h=map_training.drones[0].grid.grid.shape[0],w=map_training.drones[0].grid.grid.shape[1],frame_stack=n_frames_stack).to(device)
     value_net = NetworkValue(h=map_training.drones[0].grid.grid.shape[0],w=map_training.drones[0].grid.grid.shape[1],frame_stack=n_frames_stack).to(device)
