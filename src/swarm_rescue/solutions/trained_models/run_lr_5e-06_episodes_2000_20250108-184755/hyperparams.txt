@@ -1,0 +1,5 @@
+LEARNING_RATE = 5e-06
+ENTROPY_BETA = 0.1
+NB_EPISODES = 2000
+MAX_STEPS = 400
+Other hyperparams...

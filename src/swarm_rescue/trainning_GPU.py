@@ -34,6 +34,9 @@ from solutions.my_drone_A2C_trainning import MyDroneHulk
 
 from torch.utils.data import Dataset, DataLoader
 
+torch.set_default_device("cuda")
+
+
 class DroneDataset(Dataset):
     def __init__(self, states_maps, states_vectors, actions, returns):
         # Convert lists to tensors
@@ -180,7 +183,7 @@ def select_action(policy_net, state_map,state_vector):
         
         log_prob = log_probs_continuous 
 
-        return action.detach().cpu(), log_prob
+        return action.detach(), log_prob
 
 
 def train(n_frames_stack=4):
@@ -206,8 +209,8 @@ def train(n_frames_stack=4):
     playground = map_training.construct_playground(drone_type=MyDroneHulk)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("Using device:", device)
-    policy_net = NetworkPolicy(h=map_training.drones[0].grid.grid.shape[0],w=map_training.drones[0].grid.grid.shape[1],frame_stack=n_frames_stack)
-    value_net = NetworkValue(h=map_training.drones[0].grid.grid.shape[0],w=map_training.drones[0].grid.grid.shape[1],frame_stack=n_frames_stack)
+    policy_net = NetworkPolicy(h=map_training.drones[0].grid.grid.shape[0],w=map_training.drones[0].grid.grid.shape[1],frame_stack=n_frames_stack).to(device)
+    value_net = NetworkValue(h=map_training.drones[0].grid.grid.shape[0],w=map_training.drones[0].grid.grid.shape[1],frame_stack=n_frames_stack).to(device)
 
     optimizer_policy = optim.Adam(policy_net.parameters(), lr=LEARNING_RATE)
     optimizer_value = optim.Adam(value_net.parameters(), lr=LEARNING_RATE)
