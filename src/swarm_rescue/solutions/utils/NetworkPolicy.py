@@ -29,7 +29,7 @@ class NetworkPolicy(nn.Module):
         self.fc_cnn = nn.Linear(cnn_flatten_size, cnn_output_dim)
 
         # MLP final 
-        mlp_input_dim = cnn_output_dim + global_state_dim
+        mlp_input_dim = cnn_output_dim + global_state_dim*frame_stack
         
         self.mlp = nn.Sequential(
             nn.Linear(mlp_input_dim, hidden_size),

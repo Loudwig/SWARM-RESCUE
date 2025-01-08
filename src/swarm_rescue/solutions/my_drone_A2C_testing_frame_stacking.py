@@ -52,15 +52,14 @@ class MyDroneHulk(DroneAbstract):
 
         self.frame_stack = 4
         self.frame_buffer = deque(maxlen=self.frame_stack)  
+        self.state_buffer = deque(maxlen=self.frame_stack)
         # l'initialisé avec des images de la map
         for _ in range(self.frame_stack):
             self.frame_buffer.append(torch.zeros((1,2,self.grid.grid.shape[0], self.grid.grid.shape[1]), dtype=torch.float32, device=device))
-        
+            self.state_buffer.append(torch.zeros((1,6), dtype=torch.float32, device=device))
         # Par défaut on load un model. Si on veut l'entrainer il faut redefinir policy net et value net        
         # Si model enregistré
             
-        
-
         try : 
                 
              self.policy_model_path = "solutions/utils/trained_models/policy_net.pth"
@@ -69,8 +68,8 @@ class MyDroneHulk(DroneAbstract):
              self.value_net = NetworkValue(h=self.grid.grid.shape[0],w=self.grid.grid.shape[1],frame_stack=self.frame_stack)
              self.policy_net.load_state_dict(torch.load(self.policy_model_path))
              self.value_net.load_state_dict(torch.load(self.value_model_path))
-             # self.policy_net.to(device)
-             # self.value_net.to(device)
+             self.policy_net.to(device)
+             self.value_net.to(device)
              print("Model loaded successfully")
     
         except :
@@ -113,8 +112,11 @@ class MyDroneHulk(DroneAbstract):
         maps = torch.tensor([self.grid.grid, self.grid.position_grid], dtype=torch.float32, device=device).unsqueeze(0)
         global_state = torch.tensor([self.estimated_pose.position[0], self.estimated_pose.position[1], self.estimated_pose.orientation, self.estimated_pose.vitesse_X, self.estimated_pose.vitesse_Y, self.estimated_pose.vitesse_angulaire], dtype=torch.float32, device=device).unsqueeze(0)
         self.frame_buffer.append(maps)
+        self.state_buffer.append(global_state)
         stacked_frames = torch.cat(list(self.frame_buffer), dim=1)
-        action,_ = self.select_action(stacked_frames,global_state)
+        stacked_states = torch.cat(list(self.state_buffer), dim=1)
+        print(f" shape de global state stacked{stacked_states.shape}")
+        action,_ = self.select_action(stacked_frames,stacked_states)
         command = self.process_actions(action)
         return command
 

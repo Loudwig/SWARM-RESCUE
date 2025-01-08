@@ -195,6 +195,7 @@ def train(n_frames_stack=4):
 
     # Initialize frame buffers
     frame_buffers = {drone: deque(maxlen=n_frames_stack) for drone in map_training.drones}
+    global_state_buffer = { drone : deque(maxlen= n_frames_stack) for drone in map_training.drones}
     rewards_per_episode = []
     done = False
 
@@ -213,7 +214,18 @@ def train(n_frames_stack=4):
             dummy_maps = torch.zeros((1, 2,map_training.drones[0].grid.grid.shape[0], map_training.drones[0].grid.grid.shape[1]), device=device)
             for _ in range(n_frames_stack):
                 frame_buffers[drone].append(dummy_maps)
-        
+
+            if drone in global_state_buffer: 
+                global_state_buffer[drone].clear()
+            else :
+                global_state_buffer[drone] = deque(maxlen=n_frames_stack)
+            
+            # initialize with dummy global states
+
+            dummy_state = torch.zeros((1, 6), device=device)
+            for _ in range(n_frames_stack):
+                global_state_buffer[drone].append(dummy_state)
+            
         states_map = []
         states_vector = []
         actions = []
@@ -244,14 +256,18 @@ def train(n_frames_stack=4):
                 
                 # Update frame buffer
                 frame_buffers[drone].append(maps)
+                global_state_buffer[drone].append(global_state)
                 
                 # Stack frames for network input
                 stacked_frames = torch.cat(list(frame_buffers[drone]), dim=1)
+                # Stack global states for network input
+                stacked_global_states = torch.cat(list(global_state_buffer[drone]), dim=1)
+
                 states_map.append(stacked_frames)
-                states_vector.append(global_state)
+                states_vector.append(stacked_global_states)
                 
                 # Select action using stacked frames
-                action, _ = select_action(policy_net, stacked_frames, global_state)
+                action, _ = select_action(policy_net, stacked_frames, stacked_global_states)
                 actions_drones[drone] = drone.process_actions(action)
                 actions.append(action)
             
