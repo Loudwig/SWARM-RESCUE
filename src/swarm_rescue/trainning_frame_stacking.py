@@ -74,6 +74,7 @@ def compute_returns(rewards):
 
 def optimize_batch(states_map_batch, states_vector_batch, actions_batch, returns_batch, 
                   policy_net, value_net, optimizer_policy, optimizer_value, device):
+    
     # Move tensors to device and ensure proper dimensions
     states_map_batch = states_map_batch.to(device)
     states_vector_batch = states_vector_batch.to(device)
@@ -180,6 +181,7 @@ def select_action(policy_net, state_map,state_vector):
 
 
 def train(n_frames_stack=4):
+    
     print("Training...")
     map_training = M1()
     playground = map_training.construct_playground(drone_type=MyDroneHulk)
@@ -202,8 +204,8 @@ def train(n_frames_stack=4):
     for episode in range(NB_EPISODES):
         playground.reset()
         
+        # resetting all needs to be done for each drone
         for drone in map_training.drones:
-            #print(f"Drone {drone.identifier} resetting...")
             drone.grid.reset()
             if drone in frame_buffers: 
                 frame_buffers[drone].clear()
@@ -225,7 +227,8 @@ def train(n_frames_stack=4):
             dummy_state = torch.zeros((1, 6), device=device)
             for _ in range(n_frames_stack):
                 global_state_buffer[drone].append(dummy_state)
-            
+
+        # initialisations    
         states_map = []
         states_vector = []
         actions = []
@@ -245,14 +248,14 @@ def train(n_frames_stack=4):
                 # Get current frame
                 maps = torch.tensor([drone.grid.grid, drone.grid.position_grid], 
                                   dtype=torch.float32, device=device).unsqueeze(0)
-                global_state = torch.tensor([
-                    drone.estimated_pose.position[0],
+                
+
+                global_state = drone.process_state_before_network(drone.estimated_pose.position[0],
                     drone.estimated_pose.position[1],
                     drone.estimated_pose.orientation,
                     drone.estimated_pose.vitesse_X,
                     drone.estimated_pose.vitesse_Y,
-                    drone.estimated_pose.vitesse_angulaire
-                ], dtype=torch.float32, device=device).unsqueeze(0)
+                    drone.estimated_pose.vitesse_angulaire)
                 
                 # Update frame buffer
                 frame_buffers[drone].append(maps)
@@ -315,7 +318,7 @@ def train(n_frames_stack=4):
             plot = False
             
             # Plot the losses
-            if plot or episode % 1000 ==1:
+            if plot and episode % 200 ==1:
                 plt.figure(figsize=(14, 7))
                 
                 plt.subplot(2, 3, 1)

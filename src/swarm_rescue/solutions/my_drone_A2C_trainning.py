@@ -45,7 +45,7 @@ class MyDroneHulk(DroneAbstract):
             
         # MAPING
         self.estimated_pose = Pose() # Fonctionne commant sans le GPS ?  erreur ou qu'est ce que cela retourne ? 
-        resolution = 8 # pourquoi ?  Ok bon compromis entre précision et temps de calcul
+        resolution = 10 # pourquoi ?  Ok bon compromis entre précision et temps de calcul
         self.grid = OccupancyGrid(size_area_world=self.size_area,
                                   resolution=resolution,
                                   lidar=self.lidar())
@@ -131,8 +131,6 @@ class MyDroneHulk(DroneAbstract):
         if (abs(forward) < 0.5 and abs(lateral) < 0.5 and abs(rotation) < 0.5):
             print("actions not saturated")
             
-            
-        
         return reward
 
     def state_update(self,found_wounded):
@@ -223,5 +221,9 @@ class MyDroneHulk(DroneAbstract):
             "grasper": 0  # 0 or 1 for grasping
         }
 
-    
+    def process_state_before_network(self,positionX,positionY,orientation,vitesse_X,vitesse_Y,vitesse_angulaire):
+        Px,Py = self.grid._conv_world_to_grid(positionX,positionY)
+        #print(f"Px,Py : {Px,Py}")
+        return torch.tensor([Px,Py,orientation,vitesse_X,vitesse_Y,vitesse_angulaire], dtype=torch.float32, device=device).unsqueeze(0)
+
 

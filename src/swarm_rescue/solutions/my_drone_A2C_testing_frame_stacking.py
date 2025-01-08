@@ -254,6 +254,11 @@ class MyDroneHulk(DroneAbstract):
     def draw_top_layer(self):
         pass
 
+    def process_state_before_network(self,positionX,positionY,orientation,vitesse_X,vitesse_Y,vitesse_angulaire):
+        Px,Py = self.grid._conv_world_to_grid(positionX,positionY)
+        #print(f"Px,Py : {Px,Py}")
+        return torch.tensor([Px,Py,orientation,vitesse_X,vitesse_Y,vitesse_angulaire], dtype=torch.float32, device=device).unsqueeze(0)
+
     def process_actions(self,actions):
         return {
             "forward": actions[0],
