@@ -67,3 +67,4 @@ class Pose:
             self.gps = True
             self.position: np.array = position
             self.orientation: float = orientation
+        

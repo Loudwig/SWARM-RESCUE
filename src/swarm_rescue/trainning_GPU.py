@@ -11,6 +11,9 @@ from pathlib import Path
 import torch.nn as nn
 import torch.optim as optim
 import matplotlib.pyplot as plt
+import time
+import os
+import csv
 
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -51,8 +54,8 @@ class DroneDataset(Dataset):
 GAMMA = 0.99
 LEARNING_RATE = 5e-6
 ENTROPY_BETA = 0.1
-NB_EPISODES = 1200
-MAX_STEPS = 400
+NB_EPISODES = 10
+MAX_STEPS = 100
 
 LossValue = []
 LossPolicy = []
@@ -183,6 +186,22 @@ def select_action(policy_net, state_map,state_vector):
 def train(n_frames_stack=4):
     
     print("Training...")
+
+
+    # Create a unique folder name based on hyperparameters and timestamp
+    current_time = time.strftime("%Y%m%d-%H%M%S")
+    folder_name = f"solutions/trained_models/run_lr_{LEARNING_RATE}_episodes_{NB_EPISODES}_{current_time}"
+    os.makedirs(folder_name, exist_ok=True)
+
+    # Save hyperparameters to a text file
+    hyperparams_path = os.path.join(folder_name, "hyperparams.txt")
+    with open(hyperparams_path, 'w') as f:
+        f.write(f"LEARNING_RATE = {LEARNING_RATE}\n")
+        f.write(f"ENTROPY_BETA = {ENTROPY_BETA}\n")
+        f.write(f"NB_EPISODES = {NB_EPISODES}\n")
+        f.write(f"MAX_STEPS = {MAX_STEPS}\n")
+        f.write(f"Other hyperparams...\n")
+
     map_training = M1()
     playground = map_training.construct_playground(drone_type=MyDroneHulk)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -243,7 +262,7 @@ def train(n_frames_stack=4):
             
             for drone in map_training.drones:
                 drone.timestep_count = step
-                drone.showMaps(display_zoomed_position_grid=True, display_zoomed_grid=True)
+                #drone.showMaps(display_zoomed_position_grid=False, display_zoomed_grid=False)
                 
                 # Get current frame
                 maps = torch.tensor([drone.grid.grid, drone.grid.position_grid], 
@@ -312,8 +331,8 @@ def train(n_frames_stack=4):
         if episode % 5 == 1:
             
             print(f"Episode {episode}, Reward: {total_reward}, Mean Last 5 Rewards: {np.mean(rewards_per_episode[-5:])}")
-            torch.save(policy_net.state_dict(), 'solutions/utils/trained_models/policy_net.pth')
-            torch.save(value_net.state_dict(), 'solutions/utils/trained_models/value_net.pth')
+            torch.save(policy_net.state_dict(), os.path.join(folder_name, 'policy_net.pth'))
+            torch.save(value_net.state_dict(), os.path.join(folder_name, 'value_net.pth'))
             
             plot = False
             
@@ -370,6 +389,37 @@ def train(n_frames_stack=4):
         if np.mean(rewards_per_episode[-5:]) > 10000:
             print(f"Training solved in {episode} episodes!")
             break
+    
+
+    # After training ends, store the loss arrays in a CSV file
+    losses_csv_path = os.path.join(folder_name, "losses.csv")
+    with open(losses_csv_path, 'w', newline='') as csv_file:
+        csv_writer = csv.writer(csv_file)
+        # Header
+        csv_writer.writerow(["Step", "PolicyLoss", "ValueLoss", "EntropyLoss", "OutboundLoss", "WeightsPolicyLoss", "ExplorationLoss","RewardPerEpisode"])
+        # Rows
+        for i in range(len(LossPolicy)):
+            csv_writer.writerow([
+                i,
+                LossPolicy[i],
+                LossValue[i],
+                LossEntropy[i],
+                LossOutbound[i],
+                LossWeightsPolicy[i],
+                LossExploration[i],
+            ])
+
+    # idem with rewards per episode : 
+    rewards_csv_path = os.path.join(folder_name, "rewards_per_episode.csv")
+    with open(rewards_csv_path, 'w', newline='') as csv_file:
+        csv_writer = csv.writer(csv_file)
+        # Header
+        csv_writer.writerow(["Step", "TotalReward"])
+        # Rows
+        for i, reward in enumerate(rewards_per_episode):
+            csv_writer.writerow([i, reward])
+            
+    print("Training complete. Files saved in:", folder_name)
 
 if __name__ == "__main__":
     train()
