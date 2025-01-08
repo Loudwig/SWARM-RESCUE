@@ -4,10 +4,13 @@ import torch.nn.functional as F
 import math
 
 class NetworkValue(nn.Module):
-    def __init__(self, map_channels= 2,h =100,w = 63,cnn_output_dim = 64,global_state_dim = 6,hidden_size = 32,num_actions = 3):
+    def __init__(self, map_channels= 2,h =100,w = 63,cnn_output_dim = 64,global_state_dim = 6,hidden_size = 32,num_actions = 3,frame_stack=1):
         super(NetworkValue, self).__init__()
+        
+        self.input_channels = map_channels * frame_stack
+        
         self.cnn = nn.Sequential(
-            nn.Conv2d(map_channels, 16, kernel_size=3, stride=2, padding=1),
+            nn.Conv2d(self.input_channels, 16, kernel_size=3, stride=2, padding=1),
             nn.ReLU(),
             nn.Conv2d(16, 32, kernel_size=3, stride=2, padding=1),
             nn.ReLU(),
@@ -17,7 +20,7 @@ class NetworkValue(nn.Module):
 
         # calculate the output size of the CNN
         with torch.no_grad():
-            dummy_input = torch.zeros(1, map_channels, h, w)
+            dummy_input = torch.zeros(1, self.input_channels, h, w)
             dummy_output = self.cnn(dummy_input)
             cnn_flatten_size = dummy_output.numel()
 

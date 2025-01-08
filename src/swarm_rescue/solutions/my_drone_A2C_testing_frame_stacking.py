@@ -40,9 +40,7 @@ class MyDroneHulk(DroneAbstract):
     def __init__(self,identifier: Optional[int] = None,misc_data: Optional[MiscData] = None,**kwargs):
         super().__init__(identifier=identifier,misc_data=misc_data,**kwargs)
         
-        # Par défaut on load un model. Si on veut l'entrainer il faut redefinir policy net et value net        
-        # Si model enregistré
-            
+
         # MAPING
         self.estimated_pose = Pose() # Fonctionne commant sans le GPS ?  erreur ou qu'est ce que cela retourne ? 
         resolution = 8 # pourquoi ?  Ok bon compromis entre précision et temps de calcul
@@ -50,6 +48,35 @@ class MyDroneHulk(DroneAbstract):
                                   resolution=resolution,
                                   lidar=self.lidar())
     
+
+
+        self.frame_stack = 4
+        self.frame_buffer = deque(maxlen=self.frame_stack)  
+        # l'initialisé avec des images de la map
+        for _ in range(self.frame_stack):
+            self.frame_buffer.append(torch.zeros((1,2,self.grid.grid.shape[0], self.grid.grid.shape[1]), dtype=torch.float32, device=device))
+        
+        # Par défaut on load un model. Si on veut l'entrainer il faut redefinir policy net et value net        
+        # Si model enregistré
+            
+        
+
+        try : 
+                
+             self.policy_model_path = "solutions/utils/trained_models/policy_net.pth"
+             self.value_model_path = "solutions/utils/trained_models/value_net.pth"
+             self.policy_net = NetworkPolicy(h=self.grid.grid.shape[0],w=self.grid.grid.shape[1],frame_stack=self.frame_stack)
+             self.value_net = NetworkValue(h=self.grid.grid.shape[0],w=self.grid.grid.shape[1],frame_stack=self.frame_stack)
+             self.policy_net.load_state_dict(torch.load(self.policy_model_path))
+             self.value_net.load_state_dict(torch.load(self.value_model_path))
+             # self.policy_net.to(device)
+             # self.value_net.to(device)
+             print("Model loaded successfully")
+    
+        except :
+            print("No model found, using default policy and value networks")
+            self.policy_net = NetworkPolicy(h=self.grid.grid.shape[0],w=self.grid.grid.shape[1],frame_stack=self.frame_stack)
+            self.value_net = NetworkValue(h=self.grid.grid.shape[0],w=self.grid.grid.shape[1],frame_stack=self.frame_stack)
 
         self.display_map = True # Display the probability map during the simulation
 
@@ -70,7 +97,8 @@ class MyDroneHulk(DroneAbstract):
         self.log_file = "logs/log.txt"
         self.log_initialized = False
         self.flush_interval = 50  # Number of timesteps before flushing buffer
-        self.timestep_count = 0  # Counter to track timesteps   
+        self.timestep_count = 0  # Counter to track timesteps 
+
          
     def define_message_for_all(self):
         """
@@ -79,7 +107,16 @@ class MyDroneHulk(DroneAbstract):
         pass
 
     def control(self):
-        pass
+        self.timestep_count +=1 
+        self.update_map_pose_speed()
+        # print( f"EXPLORATION SCORE : {self.grid.exploration_score}")
+        maps = torch.tensor([self.grid.grid, self.grid.position_grid], dtype=torch.float32, device=device).unsqueeze(0)
+        global_state = torch.tensor([self.estimated_pose.position[0], self.estimated_pose.position[1], self.estimated_pose.orientation, self.estimated_pose.vitesse_X, self.estimated_pose.vitesse_Y, self.estimated_pose.vitesse_angulaire], dtype=torch.float32, device=device).unsqueeze(0)
+        self.frame_buffer.append(maps)
+        stacked_frames = torch.cat(list(self.frame_buffer), dim=1)
+        action,_ = self.select_action(stacked_frames,global_state)
+        command = self.process_actions(action)
+        return command
 
     def process_semantic_sensor(self):
         semantic_values = self.semantic_values()
@@ -128,8 +165,8 @@ class MyDroneHulk(DroneAbstract):
         reward -= time_penalty
 
         # give penalty when action are initialy not between -0.9 and 0.9 
-        if (abs(forward) < 0.5 and abs(lateral) < 0.5 and abs(rotation) < 0.5):
-            print("actions not saturated")
+        if (abs(forward) < 0.95 and abs(lateral) < 0.95 and abs(rotation) < 0.95):
+            print("actions in range")
             
             
         
@@ -223,5 +260,36 @@ class MyDroneHulk(DroneAbstract):
             "grasper": 0  # 0 or 1 for grasping
         }
 
-    
+    def select_action(self, state_map,state_vector):
+        
+        state_map = torch.FloatTensor(state_map).to(device)
+        state_vector = torch.FloatTensor(state_vector).to(device)
+        means, log_stds = self.policy_net(state_map,state_vector)
+
+        # Sample continuous actions
+        stds = torch.exp(log_stds)
+        sampled_continuous_actions = means + torch.randn_like(means) * stds
+
+        # print(f"actions before tanh: {sampled_continuous_actions}")
+        continuous_actions = torch.tanh(sampled_continuous_actions)
+        # print(f"actions after tanh: {continuous_actions}")
+        
+        # Compute log probabilities 
+        # log prob with tanh squashing and gaussian prob
+        log_probs_continuous = -0.5 * (((sampled_continuous_actions - means) / (stds + 1e-8)) ** 2 + 2 * log_stds + math.log(2 * math.pi))
+        log_probs_continuous = log_probs_continuous.sum(dim=1)
+
+        log_probs_continuous = log_probs_continuous - torch.sum(torch.log(1 - continuous_actions ** 2 + 1e-6), dim=1)
+
+        # Combine actions
+        action = continuous_actions[0]
+        #print(f"action: {action}")
+        
+        if torch.isnan(action).any():
+            print("NaN detected in action")
+            return [0, 0, 0], None
+        
+        log_prob = log_probs_continuous 
+        return action.detach().cpu(), log_prob
+
 
