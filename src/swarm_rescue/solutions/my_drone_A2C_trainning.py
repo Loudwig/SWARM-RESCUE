@@ -12,7 +12,7 @@ import torch.nn as nn
 import torch.optim as optim
 
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+device = torch.device('cuda:2' if torch.cuda.is_available() else 'cpu')
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from maps.map_intermediate_01 import MyMapIntermediate01 as M1
 from spg_overlay.utils.constants import MAX_RANGE_LIDAR_SENSOR
