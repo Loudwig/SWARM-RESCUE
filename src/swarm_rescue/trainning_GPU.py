@@ -157,10 +157,16 @@ def select_action(policy_net, state_map, state_vector):
     if isinstance(state_map, list):
         state_map = np.array(state_map)
         print('Converted state_map to numpy array.')
-    print('State map shape before conversion:', state_map.shape)
+    elif isinstance(state_map, torch.Tensor):
+        print('State_map is already a tensor.')
 
-    state_map = torch.FloatTensor(state_map).to(device)
-    print('State map shape after conversion:', state_map.shape)
+    print('State map shape before processing:', state_map.shape)
+
+    if not isinstance(state_map, torch.Tensor):
+        state_map = torch.FloatTensor(state_map)  # Convert to tensor if not already
+    state_map = state_map.to(device)  # Ensure it's on the correct device
+
+    print('State map shape after processing:', state_map.shape)
     print('State map device:', state_map.device)
 
     state_vector = torch.FloatTensor(state_vector).to(device)
