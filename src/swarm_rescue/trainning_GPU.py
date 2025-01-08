@@ -160,7 +160,7 @@ def select_action(policy_net, state_map, state_vector):
         #print('Converted state_map to numpy array.')
     elif isinstance(state_map, torch.Tensor):
         #print('State_map is already a tensor.')
-
+        pass
     #print('State map shape before processing:', state_map.shape)
 
     if not isinstance(state_map, torch.Tensor):
