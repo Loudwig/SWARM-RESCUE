@@ -54,8 +54,8 @@ class DroneDataset(Dataset):
 GAMMA = 0.99
 LEARNING_RATE = 5e-6
 ENTROPY_BETA = 0.1
-NB_EPISODES = 10
-MAX_STEPS = 100
+NB_EPISODES = 2000
+MAX_STEPS = 400
 
 LossValue = []
 LossPolicy = []
@@ -205,7 +205,7 @@ def train(n_frames_stack=4):
     map_training = M1()
     playground = map_training.construct_playground(drone_type=MyDroneHulk)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    
+    print("Using device:", device)
     policy_net = NetworkPolicy(h=map_training.drones[0].grid.grid.shape[0],w=map_training.drones[0].grid.grid.shape[1],frame_stack=n_frames_stack)
     value_net = NetworkValue(h=map_training.drones[0].grid.grid.shape[0],w=map_training.drones[0].grid.grid.shape[1],frame_stack=n_frames_stack)
 
