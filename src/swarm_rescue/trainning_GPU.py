@@ -37,22 +37,24 @@ from torch.utils.data import Dataset, DataLoader
 torch.set_default_device("cuda:2")
 
 
-class DroneDataset(Dataset):
+class DroneDataset:
     def __init__(self, states_maps, states_vectors, actions, returns):
-        # Convert lists to tensors
-        self.states_maps = torch.stack([torch.FloatTensor(s).squeeze(0) for s in states_maps])
-        self.states_vectors = torch.stack([torch.FloatTensor(s).squeeze(0) for s in states_vectors])
-        self.actions = torch.stack([torch.FloatTensor(a) for a in actions])
-        self.returns = torch.FloatTensor(returns)
+        # Ensure all elements in states_maps are tensors on the correct device
+        self.states_maps = torch.stack([
+            s.squeeze(0) if isinstance(s, torch.Tensor) else torch.FloatTensor(s).squeeze(0).to(device)
+            for s in states_maps
+        ])
+        
+        # Similarly handle states_vectors, actions, and returns if needed
+        self.states_vectors = torch.FloatTensor(states_vectors).to(device)
+        self.actions = torch.FloatTensor(actions).to(device)
+        self.returns = torch.FloatTensor(returns).to(device)
 
     def __len__(self):
-        return len(self.returns)
+        return len(self.states_maps)
 
     def __getitem__(self, idx):
-        return (self.states_maps[idx], 
-                self.states_vectors[idx], 
-                self.actions[idx], 
-                self.returns[idx])
+        return self.states_maps[idx], self.states_vectors[idx], self.actions[idx], self.returns[idx]
 
 GAMMA = 0.99
 LEARNING_RATE = 5e-6
@@ -155,34 +157,34 @@ def select_action(policy_net, state_map, state_vector):
     # Debugging and type-checking for state_map
     if isinstance(state_map, list):
         state_map = np.array(state_map)
-        print('Converted state_map to numpy array.')
+        #print('Converted state_map to numpy array.')
     elif isinstance(state_map, torch.Tensor):
-        print('State_map is already a tensor.')
+        #print('State_map is already a tensor.')
 
-    print('State map shape before processing:', state_map.shape)
+    #print('State map shape before processing:', state_map.shape)
 
     if not isinstance(state_map, torch.Tensor):
         state_map = torch.FloatTensor(state_map)  # Convert to tensor if not already
     state_map = state_map.to(device)  # Ensure it's on the correct device
 
-    print('State map shape after processing:', state_map.shape)
-    print('State map device:', state_map.device)
+    #print('State map shape after processing:', state_map.shape)
+    #print('State map device:', state_map.device)
 
     # Debugging and type-checking for state_vector
     if isinstance(state_vector, list):
         state_vector = np.array(state_vector)
-        print('Converted state_vector to numpy array.')
+        #print('Converted state_vector to numpy array.')
     elif isinstance(state_vector, torch.Tensor):
-        print('State_vector is already a tensor.')
-
-    print('State vector shape before processing:', state_vector.shape)
+        #print('State_vector is already a tensor.')
+        pass
+    #print('State vector shape before processing:', state_vector.shape)
 
     if not isinstance(state_vector, torch.Tensor):
         state_vector = torch.FloatTensor(state_vector)  # Convert to tensor if not already
     state_vector = state_vector.to(device)  # Ensure it's on the correct device
 
-    print('State vector shape after processing:', state_vector.shape)
-    print('State vector device:', state_vector.device)
+    #print('State vector shape after processing:', state_vector.shape)
+    #print('State vector device:', state_vector.device)
 
     # Policy network forward pass
     means, log_stds = policy_net(state_map, state_vector)
