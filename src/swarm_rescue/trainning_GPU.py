@@ -151,9 +151,8 @@ def optimize_batch(states_map_batch, states_vector_batch, actions_batch, returns
     optimizer_value.zero_grad()
     value_loss.backward()
     optimizer_value.step()
-
 def select_action(policy_net, state_map, state_vector):
-    # Debugging and type-checking
+    # Debugging and type-checking for state_map
     if isinstance(state_map, list):
         state_map = np.array(state_map)
         print('Converted state_map to numpy array.')
@@ -169,13 +168,28 @@ def select_action(policy_net, state_map, state_vector):
     print('State map shape after processing:', state_map.shape)
     print('State map device:', state_map.device)
 
-    state_vector = torch.FloatTensor(state_vector).to(device)
+    # Debugging and type-checking for state_vector
+    if isinstance(state_vector, list):
+        state_vector = np.array(state_vector)
+        print('Converted state_vector to numpy array.')
+    elif isinstance(state_vector, torch.Tensor):
+        print('State_vector is already a tensor.')
+
+    print('State vector shape before processing:', state_vector.shape)
+
+    if not isinstance(state_vector, torch.Tensor):
+        state_vector = torch.FloatTensor(state_vector)  # Convert to tensor if not already
+    state_vector = state_vector.to(device)  # Ensure it's on the correct device
+
+    print('State vector shape after processing:', state_vector.shape)
+    print('State vector device:', state_vector.device)
+
+    # Policy network forward pass
     means, log_stds = policy_net(state_map, state_vector)
 
     # Sample continuous actions
     stds = torch.exp(log_stds)
     sampled_continuous_actions = means + torch.randn_like(means) * stds
-
     continuous_actions = torch.tanh(sampled_continuous_actions)
 
     # Compute log probabilities
@@ -195,6 +209,7 @@ def select_action(policy_net, state_map, state_vector):
     log_prob = log_probs_continuous
 
     return action.detach(), log_prob
+
 
 
 
