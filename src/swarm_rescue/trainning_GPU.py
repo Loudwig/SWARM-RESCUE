@@ -35,6 +35,8 @@ from torch.utils.data import Dataset, DataLoader
 
 device = torch.device('cuda:2' if torch.cuda.is_available() else 'cpu')
 torch.set_default_device(device)
+generator = torch.Generator(device=device)
+
 
 
 class DroneDataset:
@@ -353,7 +355,7 @@ def train(n_frames_stack=4):
         rewards_per_episode.append(total_reward)
 
         dataset = DroneDataset(states_map, states_vector, actions, returns)
-        data_loader = DataLoader(dataset, batch_size=8, shuffle=True)
+        data_loader = DataLoader(dataset, batch_size=8, shuffle=True,generator = generator)
         for batch in data_loader:
             states_map_b, states_vector_b, actions_b, returns_b = batch
             optimize_batch(states_map_b, states_vector_b, actions_b, returns_b, policy_net, value_net, optimizer_policy, optimizer_value, device)
