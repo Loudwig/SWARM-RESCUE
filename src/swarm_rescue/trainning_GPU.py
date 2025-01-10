@@ -86,10 +86,10 @@ def optimize_batch(states_map_batch, states_vector_batch, actions_batch, returns
                   policy_net, value_net, optimizer_policy, optimizer_value, device):
     
     # Move tensors to device and ensure proper dimensions
-    states_map_batch = states_map_batch
-    states_vector_batch = states_vector_batch
-    actions_batch = actions_batch
-    returns_batch = returns_batch
+    states_map_batch = states_map_batch.to(device)
+    states_vector_batch = states_vector_batch.to(device)
+    actions_batch = actions_batch.to(device)
+    returns_batch = returns_batch.to(device)
 
     # Forward pass
     means, log_stds = policy_net(states_map_batch, states_vector_batch)
