@@ -59,10 +59,10 @@ class DroneDataset:
 
 GAMMA = 0.99
 LEARNING_RATE = 5e-6
-ENTROPY_BETA = 0.1
-NB_EPISODES = 400
-MAX_STEPS = 120
-BATCH_SIZE = 16
+ENTROPY_BETA = 0.01
+NB_EPISODES = 500
+MAX_STEPS = 200
+BATCH_SIZE = 64
 
 LossValue = []
 LossPolicy = []
@@ -296,7 +296,7 @@ def train(n_frames_stack=4):
             
             for drone in map_training.drones:
                 drone.timestep_count = step
-               # drone.showMaps(display_zoomed_position_grid=True, display_zoomed_grid=True)
+                #drone.showMaps(display_zoomed_position_grid=True, display_zoomed_grid=True)
                 
                 # Get current frame
                 maps = torch.tensor([drone.grid.grid, drone.grid.position_grid], 
