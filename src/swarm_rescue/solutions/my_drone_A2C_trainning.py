@@ -14,6 +14,7 @@ import torch.optim as optim
 
 device = torch.device('cuda:2' if torch.cuda.is_available() else 'cpu')
 torch.set_default_device(device)
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from maps.map_intermediate_01 import MyMapIntermediate01 as M1
 from spg_overlay.utils.constants import MAX_RANGE_LIDAR_SENSOR
@@ -224,7 +225,7 @@ class MyDroneHulk(DroneAbstract):
 
     def process_state_before_network(self,positionX,positionY,orientation,vitesse_X,vitesse_Y,vitesse_angulaire):
         Px,Py = self.grid._conv_world_to_grid(positionX,positionY)
-        #print(f"Px,Py : {Px,Py}")
-        return torch.tensor([Px,Py,orientation,vitesse_X,vitesse_Y,vitesse_angulaire], dtype=torch.float32, device=device).unsqueeze(0)
-
+        state_tensor = torch.tensor([Px,Py,orientation,vitesse_X,vitesse_Y,vitesse_angulaire], dtype=torch.float32, device=device)
+        #print("state tensor", state_tensor)
+        return state_tensor
 

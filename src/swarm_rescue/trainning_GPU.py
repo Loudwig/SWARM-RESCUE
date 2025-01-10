@@ -16,7 +16,6 @@ import os
 import csv
 
 
-device = torch.device('cuda:2' if torch.cuda.is_available() else 'cpu')
 from maps.map_intermediate_01 import MyMapIntermediate01 as M1
 from spg_overlay.utils.constants import MAX_RANGE_LIDAR_SENSOR
 from spg_overlay.entities.drone_abstract import DroneAbstract
@@ -34,21 +33,22 @@ from solutions.my_drone_A2C_trainning import MyDroneHulk
 
 from torch.utils.data import Dataset, DataLoader
 
-torch.set_default_device("cuda:2")
+device = torch.device('cuda:2' if torch.cuda.is_available() else 'cpu')
+torch.set_default_device(device)
 
 
 class DroneDataset:
     def __init__(self, states_maps, states_vectors, actions, returns):
         # Ensure all elements in states_maps are tensors on the correct device
         self.states_maps = torch.stack([
-            s.squeeze(0) if isinstance(s, torch.Tensor) else torch.FloatTensor(s).squeeze(0).to(device)
+            s.squeeze(0) if isinstance(s, torch.Tensor) else torch.FloatTensor(s).squeeze(0)
             for s in states_maps
         ])
         
         # Similarly handle states_vectors, actions, and returns if needed
-        self.states_vectors = torch.FloatTensor(states_vectors).to(device)
-        self.actions = torch.FloatTensor(actions).to(device)
-        self.returns = torch.FloatTensor(returns).to(device)
+        self.states_vectors = torch.stack([sv.squeeze(0) for sv in states_vectors])
+        self.actions = torch.stack(actions)
+        self.returns = torch.FloatTensor(returns)
 
     def __len__(self):
         return len(self.states_maps)
@@ -84,10 +84,10 @@ def optimize_batch(states_map_batch, states_vector_batch, actions_batch, returns
                   policy_net, value_net, optimizer_policy, optimizer_value, device):
     
     # Move tensors to device and ensure proper dimensions
-    states_map_batch = states_map_batch.to(device)
-    states_vector_batch = states_vector_batch.to(device)
-    actions_batch = actions_batch.to(device)
-    returns_batch = returns_batch.to(device)
+    states_map_batch = states_map_batch
+    states_vector_batch = states_vector_batch
+    actions_batch = actions_batch
+    returns_batch = returns_batch
 
     # Forward pass
     means, log_stds = policy_net(states_map_batch, states_vector_batch)
@@ -165,7 +165,7 @@ def select_action(policy_net, state_map, state_vector):
 
     if not isinstance(state_map, torch.Tensor):
         state_map = torch.FloatTensor(state_map)  # Convert to tensor if not already
-    state_map = state_map.to(device)  # Ensure it's on the correct device
+    state_map = state_map  # Ensure it's on the correct device
 
     #print('State map shape after processing:', state_map.shape)
     #print('State map device:', state_map.device)
@@ -181,7 +181,7 @@ def select_action(policy_net, state_map, state_vector):
 
     if not isinstance(state_vector, torch.Tensor):
         state_vector = torch.FloatTensor(state_vector)  # Convert to tensor if not already
-    state_vector = state_vector.to(device)  # Ensure it's on the correct device
+    state_vector = state_vector  # Ensure it's on the correct device
 
     #print('State vector shape after processing:', state_vector.shape)
     #print('State vector device:', state_vector.device)
@@ -219,7 +219,6 @@ def train(n_frames_stack=4):
     
     print("Training...")
 
-
     # Create a unique folder name based on hyperparameters and timestamp
     current_time = time.strftime("%Y%m%d-%H%M%S")
     folder_name = f"solutions/trained_models/run_lr_{LEARNING_RATE}_episodes_{NB_EPISODES}_{current_time}"
@@ -238,8 +237,8 @@ def train(n_frames_stack=4):
     playground = map_training.construct_playground(drone_type=MyDroneHulk)
     device = torch.device("cuda:2" if torch.cuda.is_available() else "cpu")
     print("Using device:", device)
-    policy_net = NetworkPolicy(h=map_training.drones[0].grid.grid.shape[0],w=map_training.drones[0].grid.grid.shape[1],frame_stack=n_frames_stack).to(device)
-    value_net = NetworkValue(h=map_training.drones[0].grid.grid.shape[0],w=map_training.drones[0].grid.grid.shape[1],frame_stack=n_frames_stack).to(device)
+    policy_net = NetworkPolicy(h=map_training.drones[0].grid.grid.shape[0],w=map_training.drones[0].grid.grid.shape[1],frame_stack=n_frames_stack)
+    value_net = NetworkValue(h=map_training.drones[0].grid.grid.shape[0],w=map_training.drones[0].grid.grid.shape[1],frame_stack=n_frames_stack)
 
     optimizer_policy = optim.Adam(policy_net.parameters(), lr=LEARNING_RATE)
     optimizer_value = optim.Adam(value_net.parameters(), lr=LEARNING_RATE)
@@ -258,6 +257,7 @@ def train(n_frames_stack=4):
         # resetting all needs to be done for each drone
         for drone in map_training.drones:
             drone.grid.reset()
+            
             if drone in frame_buffers: 
                 frame_buffers[drone].clear()
             else : # if the drone was destroyed a new drone is created. 
@@ -275,7 +275,7 @@ def train(n_frames_stack=4):
             
             # initialize with dummy global states
 
-            dummy_state = torch.zeros((1, 6), device=device)
+            dummy_state = torch.zeros((6), device=device)
             for _ in range(n_frames_stack):
                 global_state_buffer[drone].append(dummy_state)
 
@@ -294,7 +294,7 @@ def train(n_frames_stack=4):
             
             for drone in map_training.drones:
                 drone.timestep_count = step
-                #drone.showMaps(display_zoomed_position_grid=False, display_zoomed_grid=False)
+                drone.showMaps(display_zoomed_position_grid=True, display_zoomed_grid=True)
                 
                 # Get current frame
                 maps = torch.tensor([drone.grid.grid, drone.grid.position_grid], 
@@ -310,18 +310,19 @@ def train(n_frames_stack=4):
                 
                 # Update frame buffer
                 frame_buffers[drone].append(maps)
-                global_state_buffer[drone].append(global_state)
-                
+                global_state_buffer[drone].append(global_state) # global_state_buffer[drone] = deque([tensor([x,y,...],tensor([..],))]
                 # Stack frames for network input
                 stacked_frames = torch.cat(list(frame_buffers[drone]), dim=1)
                 # Stack global states for network input
-                stacked_global_states = torch.cat(list(global_state_buffer[drone]), dim=1)
-
+                stacked_global_states = torch.cat(list(global_state_buffer[drone])).unsqueeze(0) # global_states = tensor([x1,y1,..,x2,y2,...) dim = 
+                
                 states_map.append(stacked_frames)
                 states_vector.append(stacked_global_states)
                 
+                #print(f"states vector{type(states_vector)}")
                 # Select action using stacked frames
                 action, _ = select_action(policy_net, stacked_frames, stacked_global_states)
+                # action : tensor([1,-1,1])
                 actions_drones[drone] = drone.process_actions(action)
                 actions.append(action)
             

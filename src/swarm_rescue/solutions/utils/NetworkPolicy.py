@@ -47,7 +47,7 @@ class NetworkPolicy(nn.Module):
         x = F.relu(self.fc_cnn(x))
         # print(f"x shape after fc_cnn: {x.shape}")
         # print(f"global_state shape: {global_state.shape}")
-        x = torch.cat((x, global_state), dim=1)
+        x = torch.cat((x, global_state), dim=1) # On trans
         x = self.mlp(x) 
         mu = self.mu_head(x)
         log_sigma = self.log_sigma_head(x)
