@@ -235,10 +235,9 @@ def train(n_frames_stack=4):
 
     map_training = M1()
     playground = map_training.construct_playground(drone_type=MyDroneHulk)
-    device = torch.device("cuda:2" if torch.cuda.is_available() else "cpu")
     print("Using device:", device)
-    policy_net = NetworkPolicy(h=map_training.drones[0].grid.grid.shape[0],w=map_training.drones[0].grid.grid.shape[1],frame_stack=n_frames_stack)
-    value_net = NetworkValue(h=map_training.drones[0].grid.grid.shape[0],w=map_training.drones[0].grid.grid.shape[1],frame_stack=n_frames_stack)
+    policy_net = NetworkPolicy(h=map_training.drones[0].grid.grid.shape[0],w=map_training.drones[0].grid.grid.shape[1],frame_stack=n_frames_stack).to(device)
+    value_net = NetworkValue(h=map_training.drones[0].grid.grid.shape[0],w=map_training.drones[0].grid.grid.shape[1],frame_stack=n_frames_stack).to(device)
 
     optimizer_policy = optim.Adam(policy_net.parameters(), lr=LEARNING_RATE)
     optimizer_value = optim.Adam(value_net.parameters(), lr=LEARNING_RATE)
