@@ -60,9 +60,9 @@ class DroneDataset:
 GAMMA = 0.99
 LEARNING_RATE = 5e-6
 ENTROPY_BETA = 0.1
-NB_EPISODES = 500
-MAX_STEPS = 300
-BATCH_SIZE = 8
+NB_EPISODES = 400
+MAX_STEPS = 120
+BATCH_SIZE = 16
 
 LossValue = []
 LossPolicy = []
@@ -131,9 +131,9 @@ def optimize_batch(states_map_batch, states_vector_batch, actions_batch, returns
     value_loss = nn.functional.mse_loss(values, returns_batch)
 
     # L2 regularization (weight decay)
-    l2_lambda = 1e-1  # Regularization strength
-    l2_policy_loss = sum(param.pow(2.0).sum() for param in policy_net.parameters())
-    l2_value_loss = sum(param.pow(2.0).sum() for param in value_net.parameters())
+    l2_lambda = 1e-5
+    l2_policy_loss = sum(torch.sum(param ** 2) for param in policy_net.parameters())
+    l2_value_loss = sum(torch.sum(param ** 2) for param in value_net.parameters())
 
     # Add L2 regularization to the losses
     total_policy_loss += l2_lambda * l2_policy_loss
