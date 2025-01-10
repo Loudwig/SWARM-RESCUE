@@ -69,3 +69,6 @@ venv/
 logs/*
 logs/*/*
 logs/
+
+src/swarm_rescue/solutions/trained_models/*
+!src/swarm_rescue/solutions/trained_models/.gitkeep

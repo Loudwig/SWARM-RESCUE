@@ -47,7 +47,7 @@ class MyDroneHulk(DroneAbstract):
             
         # MAPING
         self.estimated_pose = Pose() # Fonctionne commant sans le GPS ?  erreur ou qu'est ce que cela retourne ? 
-        resolution = 10 # pourquoi ?  Ok bon compromis entre précision et temps de calcul
+        resolution = 8 # pourquoi ?  Ok bon compromis entre précision et temps de calcul
         self.grid = OccupancyGrid(size_area_world=self.size_area,
                                   resolution=resolution,
                                   lidar=self.lidar())

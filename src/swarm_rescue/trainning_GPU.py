@@ -63,6 +63,7 @@ LEARNING_RATE = 5e-6
 ENTROPY_BETA = 0.1
 NB_EPISODES = 2000
 MAX_STEPS = 400
+BATCH_SIZE = 8
 
 LossValue = []
 LossPolicy = []
@@ -233,6 +234,7 @@ def train(n_frames_stack=4):
         f.write(f"ENTROPY_BETA = {ENTROPY_BETA}\n")
         f.write(f"NB_EPISODES = {NB_EPISODES}\n")
         f.write(f"MAX_STEPS = {MAX_STEPS}\n")
+        f.writ(f"BATCH_SIZE = {BATCH_SIZE}\n")
         f.write(f"Other hyperparams...\n")
 
     map_training = M1()
@@ -355,71 +357,13 @@ def train(n_frames_stack=4):
         rewards_per_episode.append(total_reward)
 
         dataset = DroneDataset(states_map, states_vector, actions, returns)
-        data_loader = DataLoader(dataset, batch_size=8, shuffle=True,generator = generator)
+        data_loader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True,generator = generator)
         for batch in data_loader:
             states_map_b, states_vector_b, actions_b, returns_b = batch
             optimize_batch(states_map_b, states_vector_b, actions_b, returns_b, policy_net, value_net, optimizer_policy, optimizer_value, device)
 
         del states_map,states_vector, actions, rewards
 
-        if episode % 5 == 1:
-            
-            print(f"Episode {episode}, Reward: {total_reward}, Mean Last 5 Rewards: {np.mean(rewards_per_episode[-5:])}")
-            torch.save(policy_net.state_dict(), os.path.join(folder_name, 'policy_net.pth'))
-            torch.save(value_net.state_dict(), os.path.join(folder_name, 'value_net.pth'))
-            
-            plot = False
-            
-            # Plot the losses
-            if plot and episode % 200 ==1:
-                plt.figure(figsize=(14, 7))
-                
-                plt.subplot(2, 3, 1)
-                plt.plot(LossPolicy)
-                plt.title('Policy Loss')
-                plt.xlabel('Training Steps')
-                plt.ylabel('Loss')
-                plt.grid()
-
-                plt.subplot(2, 3, 2)
-                plt.plot(LossValue)
-                plt.title('Value Loss')
-                plt.xlabel('Training Steps')
-                plt.ylabel('Loss')
-                plt.grid()
-
-                plt.subplot(2, 3, 3)
-                plt.plot(LossEntropy)
-                plt.title('Entropy Loss')
-                plt.xlabel('Training Steps')
-                plt.ylabel('Loss')
-                plt.grid()
-
-                plt.subplot(2, 3, 4)
-                plt.plot(LossOutbound)
-                plt.title('Outbound Loss')
-                plt.xlabel('Training Steps')
-                plt.ylabel('Loss')
-                plt.grid()
-
-                plt.subplot(2, 3, 5)
-                plt.plot(LossWeightsPolicy)
-                plt.title('Weights Policy Loss')
-                plt.xlabel('Training Steps')
-                plt.ylabel('Loss')
-                plt.grid()
-
-                plt.subplot(2, 3, 6)
-                plt.plot(LossExploration)
-                plt.title('Exploration Loss')
-                plt.xlabel('Training Steps')
-                plt.ylabel('Loss')
-                plt.grid()
-
-                plt.tight_layout()
-                plt.show()
-
-            
         if np.mean(rewards_per_episode[-5:]) > 10000:
             print(f"Training solved in {episode} episodes!")
             break
