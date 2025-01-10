@@ -38,7 +38,6 @@ torch.set_default_device(device)
 generator = torch.Generator(device=device)
 
 
-
 class DroneDataset:
     def __init__(self, states_maps, states_vectors, actions, returns):
         # Ensure all elements in states_maps are tensors on the correct device
@@ -61,8 +60,8 @@ class DroneDataset:
 GAMMA = 0.99
 LEARNING_RATE = 5e-6
 ENTROPY_BETA = 0.1
-NB_EPISODES = 2000
-MAX_STEPS = 400
+NB_EPISODES = 500
+MAX_STEPS = 300
 BATCH_SIZE = 8
 
 LossValue = []
@@ -234,7 +233,7 @@ def train(n_frames_stack=4):
         f.write(f"ENTROPY_BETA = {ENTROPY_BETA}\n")
         f.write(f"NB_EPISODES = {NB_EPISODES}\n")
         f.write(f"MAX_STEPS = {MAX_STEPS}\n")
-        f.writ(f"BATCH_SIZE = {BATCH_SIZE}\n")
+        f.write(f"BATCH_SIZE = {BATCH_SIZE}\n")
         f.write(f"Other hyperparams...\n")
 
     map_training = M1()
@@ -297,7 +296,7 @@ def train(n_frames_stack=4):
             
             for drone in map_training.drones:
                 drone.timestep_count = step
-                #drone.showMaps(display_zoomed_position_grid=True, display_zoomed_grid=True)
+                drone.showMaps(display_zoomed_position_grid=True, display_zoomed_grid=True)
                 
                 # Get current frame
                 maps = torch.tensor([drone.grid.grid, drone.grid.position_grid], 
@@ -363,7 +362,12 @@ def train(n_frames_stack=4):
             optimize_batch(states_map_b, states_vector_b, actions_b, returns_b, policy_net, value_net, optimizer_policy, optimizer_value, device)
 
         del states_map,states_vector, actions, rewards
-
+        
+        if episode % 5 == 1:
+            print(f"Episode {episode}, Reward: {total_reward}, Mean Last 5 Rewards: {np.mean(rewards_per_episode[-5:])}")
+            torch.save(policy_net.state_dict(), 'solutions/utils/trained_models/policy_net.pth')
+            torch.save(value_net.state_dict(), 'solutions/utils/trained_models/value_net.pth')
+            
         if np.mean(rewards_per_episode[-5:]) > 10000:
             print(f"Training solved in {episode} episodes!")
             break
