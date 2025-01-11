@@ -66,10 +66,10 @@ class DroneDataset:
 
 GAMMA = 0.99
 LEARNING_RATE = 5e-6
-ENTROPY_BETA = 0.01
+ENTROPY_BETA = 0.03
 NB_EPISODES = 2000
-MAX_STEPS = 64 # multiple du batch size c'est mieux sinon des fois on a des batchs pas de la même taille.
-BATCH_SIZE = 8 # prendre des puissance de 2
+MAX_STEPS = 64*5 # multiple du batch size c'est mieux sinon des fois on a des batchs pas de la même taille.
+BATCH_SIZE = 64 # prendre des puissance de 2
 
 LossValue = []
 LossPolicy = []
@@ -78,7 +78,6 @@ LossOutbound = []
 LossWeightsValue = []
 LossExploration = []
 LossWeightsPolicy = []
-
 
 
 def compute_returns(rewards):
