@@ -389,7 +389,7 @@ def train(n_frames_stack=4):
     with open(losses_csv_path, 'w', newline='') as csv_file:
         csv_writer = csv.writer(csv_file)
         # Header
-        csv_writer.writerow(["Step", "PolicyLoss", "ValueLoss", "EntropyLoss", "OutboundLoss", "WeightsPolicyLoss", "ExplorationLoss","RewardPerEpisode"])
+        csv_writer.writerow(["Step", "PolicyLoss", "ValueLoss", "EntropyLoss", "OutboundLoss", "WeightsPolicyLoss", "ExplorationLoss"])
         # Rows
         for i in range(len(LossPolicy)):
             csv_writer.writerow([
@@ -411,7 +411,8 @@ def train(n_frames_stack=4):
         # Rows
         for i, reward in enumerate(rewards_per_episode):
             csv_writer.writerow([i, reward])
-            
+    torch.save(policy_net.state_dict(), os.path.join(folder_name,"policy_net.pth"))
+    torch.save(value_net.state_dict(), os.path.join(folder_name,"value_net.pth"))    
     print("Training complete. Files saved in:", folder_name)
 
 if __name__ == "__main__":
