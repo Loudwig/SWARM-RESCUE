@@ -122,23 +122,20 @@ def optimize_batch(states_map_batch, states_vector_batch, actions_batch, returns
 
     # Compute advantages with proper normalization
     advantages = returns_batch - values.detach()
+    
     # if advantages.numel() > 1:
     #     advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
     # Policy loss with proper scaling
     policy_loss = -(log_probs * advantages).mean() 
-    print(log_probs)
-    #print("exp",torch.exp(log_probs))
-    # print(log_probs*advantages)
-    # print(policy_loss)
-    # Action penalty with proper clamping
+    #print(log_probs)
     max_action_value = 1.0
     penalty_weight = 0.1  # Reduced from 10000 to prevent overshadowing other losses
-    action_penalty = penalty_weight * torch.sum(torch.clamp(actions_batch.abs() - (max_action_value - 0.1), min=0) ** 2)
+    action_penalty = penalty_weight * torch.sum(torch.clamp(actions_batch.abs() - (max_action_value - 0.3), min=0) ** 2)
 
     # Entropy regularization
     entropy_loss = -ENTROPY_BETA * (log_stds + 0.5 * math.log(2 * math.pi * math.e)).sum(dim=1).mean()
-    total_policy_loss = policy_loss + entropy_loss
+    total_policy_loss = policy_loss + entropy_loss + action_penalty
 
     # Value loss
     value_loss = nn.functional.mse_loss(values, returns_batch)
