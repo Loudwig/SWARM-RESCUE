@@ -60,9 +60,9 @@ class DroneDataset:
 GAMMA = 0.99
 LEARNING_RATE = 5e-6
 ENTROPY_BETA = 0.01
-NB_EPISODES = 500
-MAX_STEPS = 200
-BATCH_SIZE = 64
+NB_EPISODES = 2000
+MAX_STEPS = 64 # multiple du batch size c'est mieux sinon des fois on a des batchs pas de la même taille.
+BATCH_SIZE = 8 # prendre des puissance de 2
 
 LossValue = []
 LossPolicy = []
@@ -78,8 +78,10 @@ def compute_returns(rewards):
     returns = []
     g = 0
     for reward in reversed(rewards):
-        g = reward + GAMMA * g
+        g = (reward + GAMMA * g)/len(returns) # la somme ne va pas jusqu'à l'infini donc il faut peut être normalisé sinon les derniers termes ont beacoup moins de "puissance"
         returns.insert(0, g)
+    print("returns",returns)
+    print(len(returns))
     return returns
 
 def optimize_batch(states_map_batch, states_vector_batch, actions_batch, returns_batch, 
@@ -90,6 +92,7 @@ def optimize_batch(states_map_batch, states_vector_batch, actions_batch, returns
     states_vector_batch = states_vector_batch.to(device)
     actions_batch = actions_batch.to(device)
     returns_batch = returns_batch.to(device)
+    print(f"return batch shape {returns_batch.shape}")
 
     # Forward pass
     means, log_stds = policy_net(states_map_batch, states_vector_batch)
@@ -155,6 +158,7 @@ def optimize_batch(states_map_batch, states_vector_batch, actions_batch, returns
     optimizer_value.zero_grad()
     value_loss.backward()
     optimizer_value.step()
+
 def select_action(policy_net, state_map, state_vector):
     # Debugging and type-checking for state_map
     if isinstance(state_map, list):
@@ -206,6 +210,7 @@ def select_action(policy_net, state_map, state_vector):
 
     # Combine actions
     action = continuous_actions[0]
+    
     if torch.isnan(action).any():
         print("NaN detected in action")
         return [0, 0, 0], None
