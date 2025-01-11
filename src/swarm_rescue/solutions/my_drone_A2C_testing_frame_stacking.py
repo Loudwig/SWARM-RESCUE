@@ -54,25 +54,27 @@ class MyDroneHulk(DroneAbstract):
         self.frame_buffer = deque(maxlen=self.frame_stack)  
         self.state_buffer = deque(maxlen=self.frame_stack)
         # l'initialisé avec des images de la map
+        
         for _ in range(self.frame_stack):
             self.frame_buffer.append(torch.zeros((1,2,self.grid.grid.shape[0], self.grid.grid.shape[1]), dtype=torch.float32, device=device))
             self.state_buffer.append(torch.zeros((1,6), dtype=torch.float32, device=device))
         # Par défaut on load un model. Si on veut l'entrainer il faut redefinir policy net et value net        
         # Si model enregistré
             
+        
         try : 
-                
-             self.policy_model_path = "solutions/utils/trained_models/policy_net.pth"
-             self.value_model_path = "solutions/utils/trained_models/value_net.pth"
-             self.policy_net = NetworkPolicy(h=self.grid.grid.shape[0],w=self.grid.grid.shape[1],frame_stack=self.frame_stack)
-             self.value_net = NetworkValue(h=self.grid.grid.shape[0],w=self.grid.grid.shape[1],frame_stack=self.frame_stack)
-             self.policy_net.load_state_dict(torch.load(self.policy_model_path))
-             self.value_net.load_state_dict(torch.load(self.value_model_path))
-             self.policy_net.to(device)
-             self.value_net.to(device)
-             print("Model loaded successfully")
+            self.policy_model_path = "/Users/rplanchon/Documents/projet/swarmRescue/SWARM-RESCUE/src/swarm_rescue/solutions/trained_models/run_lr_3e-06_episodes_2000_20250111-124929/policy_net.pth"
+            self.value_model_path = "/Users/rplanchon/Documents/projet/swarmRescue/SWARM-RESCUE/src/swarm_rescue/solutions/trained_models/run_lr_3e-06_episodes_2000_20250111-124929/value_net.pth"
+            self.policy_net = NetworkPolicy(h=self.grid.grid.shape[0],w=self.grid.grid.shape[1],frame_stack=self.frame_stack)
+            self.value_net = NetworkValue(h=self.grid.grid.shape[0],w=self.grid.grid.shape[1],frame_stack=self.frame_stack)
+            self.policy_net.load_state_dict(torch.load(self.policy_model_path,map_location=torch.device('cpu')))
+            self.value_net.load_state_dict(torch.load(self.value_model_path,map_location=torch.device('cpu')))
+            self.policy_net.to(device)
+            self.value_net.to(device)
+            print("Model loaded successfully")
     
-        except :
+        except Exception as e:
+            print(f"Error loading model: {e}")
             print("No model found, using default policy and value networks")
             self.policy_net = NetworkPolicy(h=self.grid.grid.shape[0],w=self.grid.grid.shape[1],frame_stack=self.frame_stack)
             self.value_net = NetworkValue(h=self.grid.grid.shape[0],w=self.grid.grid.shape[1],frame_stack=self.frame_stack)
@@ -115,7 +117,7 @@ class MyDroneHulk(DroneAbstract):
         self.state_buffer.append(global_state)
         stacked_frames = torch.cat(list(self.frame_buffer), dim=1)
         stacked_states = torch.cat(list(self.state_buffer), dim=1)
-        print(f" shape de global state stacked{stacked_states.shape}")
+        #print(f" shape de global state stacked{stacked_states.shape}")
         action,_ = self.select_action(stacked_frames,stacked_states)
         command = self.process_actions(action)
         return command
