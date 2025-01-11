@@ -65,7 +65,7 @@ class DroneDataset:
         return self.states_maps[idx], self.states_vectors[idx], self.actions[idx], self.returns[idx]
 
 GAMMA = 0.99
-LEARNING_RATE = 5e-6
+LEARNING_RATE = 3e-6
 ENTROPY_BETA = 0.03
 NB_EPISODES = 2000
 MAX_STEPS = 64*5 # multiple du batch size c'est mieux sinon des fois on a des batchs pas de la même taille.
