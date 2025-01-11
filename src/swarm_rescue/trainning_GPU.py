@@ -48,8 +48,15 @@ class DroneDataset:
         
         # Similarly handle states_vectors, actions, and returns if needed
         self.states_vectors = torch.stack([sv.squeeze(0) for sv in states_vectors])
+        
+        #print(f"actions before dataset {actions}")
+
         self.actions = torch.stack(actions)
+        #print(f"actions after dataset {self.actions}")
+        #print(f"returns before DroneDataset {returns}")
         self.returns = torch.FloatTensor(returns)
+        #print(f"returns after DroneDataset {self.returns}")
+
 
     def __len__(self):
         return len(self.states_maps)
@@ -78,11 +85,11 @@ def compute_returns(rewards):
     returns = []
     g = 0
     for reward in reversed(rewards):
-        g = (reward + GAMMA * g)/len(returns) # la somme ne va pas jusqu'à l'infini donc il faut peut être normalisé sinon les derniers termes ont beacoup moins de "puissance"
+        g = (reward + GAMMA * g) # la somme ne va pas jusqu'à l'infini donc il faut peut être normalisé sinon les derniers termes ont beacoup moins de "puissance"
         returns.insert(0, g)
-    print("returns",returns)
-    print(len(returns))
-    return returns
+    #print("returns",returns)
+    #print(len(returns))
+    return returns # longeur du nombre de steps
 
 def optimize_batch(states_map_batch, states_vector_batch, actions_batch, returns_batch, 
                   policy_net, value_net, optimizer_policy, optimizer_value, device):
@@ -92,7 +99,7 @@ def optimize_batch(states_map_batch, states_vector_batch, actions_batch, returns
     states_vector_batch = states_vector_batch.to(device)
     actions_batch = actions_batch.to(device)
     returns_batch = returns_batch.to(device)
-    print(f"return batch shape {returns_batch.shape}")
+    #print(f"return batch  {returns_batch }")
 
     # Forward pass
     means, log_stds = policy_net(states_map_batch, states_vector_batch)
@@ -115,12 +122,15 @@ def optimize_batch(states_map_batch, states_vector_batch, actions_batch, returns
 
     # Compute advantages with proper normalization
     advantages = returns_batch - values.detach()
-    if advantages.numel() > 1:
-        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+    # if advantages.numel() > 1:
+    #     advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
     # Policy loss with proper scaling
-    policy_loss = -(log_probs * advantages).mean()
-
+    policy_loss = -(log_probs * advantages).mean() 
+    print(log_probs)
+    #print("exp",torch.exp(log_probs))
+    # print(log_probs*advantages)
+    # print(policy_loss)
     # Action penalty with proper clamping
     max_action_value = 1.0
     penalty_weight = 0.1  # Reduced from 10000 to prevent overshadowing other losses
