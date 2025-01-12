@@ -306,7 +306,7 @@ def train(n_frames_stack=2,n_frame_skip=4):
             if step % n_frame_skip == 0:
                 for drone in map_training.drones:
                     drone.timestep_count = step
-                    drone.showMaps(display_zoomed_position_grid=True, display_zoomed_grid=True)
+                    #drone.showMaps(display_zoomed_position_grid=True, display_zoomed_grid=True)
                     
                     # Get current frame
                     maps = torch.tensor([drone.grid.grid, drone.grid.position_grid], 
