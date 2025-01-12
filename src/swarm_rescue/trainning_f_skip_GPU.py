@@ -68,7 +68,7 @@ LEARNING_RATE = 3e-6
 ENTROPY_BETA = 0.03
 NB_EPISODES = 2000
 MAX_STEPS = 64*5 # multiple du batch size c'est mieux sinon des fois on a des batchs pas de la même taille.
-BATCH_SIZE = 64 # prendre des puissance de 2
+BATCH_SIZE = 32 # prendre des puissance de 2
 
 LossValue = []
 LossPolicy = []
@@ -128,7 +128,7 @@ def optimize_batch(states_map_batch, states_vector_batch, actions_batch, returns
     policy_loss = -(log_probs * advantages).mean() 
     #print(log_probs)
     max_action_value = 1.0
-    penalty_weight = 0.1  # Reduced from 10000 to prevent overshadowing other losses
+    penalty_weight = 1e1  # Reduced from 10000 to prevent overshadowing other losses
     action_penalty = penalty_weight * torch.sum(torch.clamp(actions_batch.abs() - (max_action_value - 0.3), min=0) ** 2)
 
     # Entropy regularization
@@ -139,7 +139,7 @@ def optimize_batch(states_map_batch, states_vector_batch, actions_batch, returns
     value_loss = nn.functional.mse_loss(values, returns_batch)
 
     # L2 regularization (weight decay)
-    l2_lambda = 1e-5
+    l2_lambda = 1e1
     l2_policy_loss = sum(torch.sum(param ** 2) for param in policy_net.parameters())
     l2_value_loss = sum(torch.sum(param ** 2) for param in value_net.parameters())
 
@@ -224,7 +224,7 @@ def select_action(policy_net, state_map, state_vector):
 
     return action.detach(), log_prob
 
-def train(n_frames_stack=4):
+def train(n_frames_stack=2,n_frame_skip=4):
     
     print("Training...")
 
@@ -241,6 +241,8 @@ def train(n_frames_stack=4):
         f.write(f"NB_EPISODES = {NB_EPISODES}\n")
         f.write(f"MAX_STEPS = {MAX_STEPS}\n")
         f.write(f"BATCH_SIZE = {BATCH_SIZE}\n")
+        f.write(f"frames_stack = {n_frames_stack}\n")
+        f.write(f"frame_skip = {n_frame_skip}\n")
         f.write(f"Other hyperparams...\n")
 
     map_training = M1()
@@ -294,65 +296,70 @@ def train(n_frames_stack=4):
         actions = []
         rewards = []
         step = 0
-        actions_drones = {drone: [0, 0, 0] for drone in map_training.drones}  # Initialize with neutral actions
+        actions_drones = {drone: drone.process_actions([0, 0, 0]) for drone in map_training.drones}  # Initialize with neutral actions
         total_reward = 0
 
 
         while not done and step < MAX_STEPS and all([drone.drone_health>0 for drone in map_training.drones]):
             step += 1
             
-            for drone in map_training.drones:
-                drone.timestep_count = step
-                #drone.showMaps(display_zoomed_position_grid=True, display_zoomed_grid=True)
-                
-                # Get current frame
-                maps = torch.tensor([drone.grid.grid, drone.grid.position_grid], 
-                                  dtype=torch.float32, device=device).unsqueeze(0)
-                
+            if step % n_frame_skip == 0:
+                for drone in map_training.drones:
+                    drone.timestep_count = step
+                    drone.showMaps(display_zoomed_position_grid=True, display_zoomed_grid=True)
+                    
+                    # Get current frame
+                    maps = torch.tensor([drone.grid.grid, drone.grid.position_grid], 
+                                    dtype=torch.float32, device=device).unsqueeze(0)
+                    
 
-                global_state = drone.process_state_before_network(drone.estimated_pose.position[0],
-                    drone.estimated_pose.position[1],
-                    drone.estimated_pose.orientation,
-                    drone.estimated_pose.vitesse_X,
-                    drone.estimated_pose.vitesse_Y,
-                    drone.estimated_pose.vitesse_angulaire)
-                
-                # Update frame buffer
-                frame_buffers[drone].append(maps)
-                global_state_buffer[drone].append(global_state) # global_state_buffer[drone] = deque([tensor([x,y,...],tensor([..],))]
-                # Stack frames for network input
-                stacked_frames = torch.cat(list(frame_buffers[drone]), dim=1)
-                # Stack global states for network input
-                stacked_global_states = torch.cat(list(global_state_buffer[drone])).unsqueeze(0) # global_states = tensor([x1,y1,..,x2,y2,...) dim = 
-                
-                states_map.append(stacked_frames)
-                states_vector.append(stacked_global_states)
-                
-                #print(f"states vector{type(states_vector)}")
-                # Select action using stacked frames
-                action, _ = select_action(policy_net, stacked_frames, stacked_global_states)
-                # action : tensor([1,-1,1])
-                actions_drones[drone] = drone.process_actions(action)
-                actions.append(action)
+                    global_state = drone.process_state_before_network(drone.estimated_pose.position[0],
+                        drone.estimated_pose.position[1],
+                        drone.estimated_pose.orientation,
+                        drone.estimated_pose.vitesse_X,
+                        drone.estimated_pose.vitesse_Y,
+                        drone.estimated_pose.vitesse_angulaire)
+                    
+                    # Update frame buffer
+                    frame_buffers[drone].append(maps)
+                    global_state_buffer[drone].append(global_state) # global_state_buffer[drone] = deque([tensor([x,y,...],tensor([..],))]
+                    # Stack frames for network input
+                    stacked_frames = torch.cat(list(frame_buffers[drone]), dim=1)
+                    # Stack global states for network input
+                    stacked_global_states = torch.cat(list(global_state_buffer[drone])).unsqueeze(0) # global_states = tensor([x1,y1,..,x2,y2,...) dim = 
+                    
+                    states_map.append(stacked_frames)
+                    states_vector.append(stacked_global_states)
+                    
+                    #print(f"states vector{type(states_vector)}")
+                    # Select action using stacked frames
+                    action, _ = select_action(policy_net, stacked_frames, stacked_global_states)
+                    # action : tensor([1,-1,1])
+                    actions_drones[drone] = drone.process_actions(action)
+                    actions.append(action)
+            
             
             playground.step(actions_drones)
             
-            for drone in map_training.drones:
-                
-                drone.update_map_pose_speed() # conséquence de l'action
-                found_wounded = drone.process_semantic_sensor()
-                min_dist = drone.process_lidar_sensor(drone.lidar())
-                is_collision = min_dist < 10
-                reward = drone.compute_reward(is_collision, found_wounded, 1,actions_drones[drone])
-                rewards.append(reward)
-                total_reward += reward
+            if step % n_frame_skip == 0:
+                for drone in map_training.drones:
+                    
+                    drone.update_map_pose_speed() # conséquence de l'action
+                    found_wounded = drone.process_semantic_sensor()
+                    min_dist = drone.process_lidar_sensor(drone.lidar())
+                    is_collision = min_dist < 10
+                    reward = drone.compute_reward(is_collision, found_wounded, 1,actions_drones[drone])
+                    rewards.append(reward)
+                    total_reward += reward
 
-                done = found_wounded
-                
-                if done:
-                    print("found wounded !")
+                    done = found_wounded
+                    
+                    if done:
+                        print("found wounded !")
 
-            
+            else : 
+                for drone in map_training.drones:
+                    drone.update_map_pose_speed()
             
         if any([drone.drone_health<=0 for drone in map_training.drones]):
             map_training = M1()

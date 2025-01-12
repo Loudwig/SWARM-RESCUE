@@ -63,8 +63,8 @@ class MyDroneHulk(DroneAbstract):
             
         
         try : 
-            self.policy_model_path = "/Users/rplanchon/Documents/projet/swarmRescue/SWARM-RESCUE/src/swarm_rescue/solutions/trained_models/run_lr_3e-06_episodes_2000_20250111-124929/policy_net.pth"
-            self.value_model_path = "/Users/rplanchon/Documents/projet/swarmRescue/SWARM-RESCUE/src/swarm_rescue/solutions/trained_models/run_lr_3e-06_episodes_2000_20250111-124929/value_net.pth"
+            self.policy_model_path = "solutions/trained_models/run_lr_1e-06_episodes_2000_20250111-174625/policy_net.pth"
+            self.value_model_path = "solutions/trained_models/run_lr_1e-06_episodes_2000_20250111-174625/value_net.pth"
             self.policy_net = NetworkPolicy(h=self.grid.grid.shape[0],w=self.grid.grid.shape[1],frame_stack=self.frame_stack)
             self.value_net = NetworkValue(h=self.grid.grid.shape[0],w=self.grid.grid.shape[1],frame_stack=self.frame_stack)
             self.policy_net.load_state_dict(torch.load(self.policy_model_path,map_location=torch.device('cpu')))
