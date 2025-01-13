@@ -38,7 +38,15 @@ class OccupancyGrid(Grid):
         self.grid_previous_score = 0
         self.exploration_score = 0
     
-    def reset(self):
+    # plus utilisé :) 
+    def reset(self,resolution):
+        self.resolution = resolution
+        
+        self.x_max_grid: int = int(self.size_area_world[0] / self.resolution
+                                   + 0.5)
+        self.y_max_grid: int = int(self.size_area_world[1] / self.resolution
+                                   + 0.5)
+        
         self.grid = np.zeros((self.x_max_grid, self.y_max_grid))
         self.position_grid = np.zeros((self.x_max_grid, self.y_max_grid))
         self.grid_score = 0

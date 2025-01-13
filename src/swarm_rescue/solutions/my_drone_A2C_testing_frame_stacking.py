@@ -27,7 +27,10 @@ from solutions.utils.grid import OccupancyGrid
 from solutions.utils.astar import *
 from solutions.utils.NetworkPolicy import NetworkPolicy
 from solutions.utils.NetworkValue import NetworkValue
+import os
 
+
+PATH_TRAINED_MODEL = "solutions/trained_models/run_lr_3e-06_episodes_2000_20250112-163118"
 
 class MyDroneHulk(DroneAbstract):
     class State(Enum):
@@ -40,31 +43,63 @@ class MyDroneHulk(DroneAbstract):
     def __init__(self,identifier: Optional[int] = None,misc_data: Optional[MiscData] = None,**kwargs):
         super().__init__(identifier=identifier,misc_data=misc_data,**kwargs)
         
+        # Default hyperparameters : 
+        self.resolution = 8
+        self.frame_skipping = 4
+        self.frame_stack = 2
+
+        # load the params of the trainning from the hyperparameters.txt file : 
+        # Search resolution, frame_skipping, frame_stack in the hyperparameters.txt file
+        # use the default values for the ones that are not found
+        try:
+            with open(os.path.join(PATH_TRAINED_MODEL,"hyperparams.txt"), "r") as f:
+                lines = f.readlines()
+                for line in lines:
+                    if "grid_resolution" in line:
+                        self.resolution = int(line.split("=")[1])
+                        print(f"Resolution found in hyperparameters: {self.resolution}")
+                    
+                    if "frame_skipping" in line:
+                        self.frame_skipping = int(line.split("=")[1])
+                        print(f"Frame skipping found in hyperparameters: {self.frame_skipping}")
+                    
+                    if "frame_stacking" in line:
+                        self.frame_stack = int(line.split("=")[1])
+                        print(f"Frame stack found in hyperparameters: {self.frame_stack}")
+                   
+
+        except Exception as e:
+            print(f"Error reading hyperparameters: {e}")
+            print("Using default hyperparameters")
+
 
         # MAPING
         self.estimated_pose = Pose() # Fonctionne commant sans le GPS ?  erreur ou qu'est ce que cela retourne ? 
-        resolution = 8 # pourquoi ?  Ok bon compromis entre précision et temps de calcul
         self.grid = OccupancyGrid(size_area_world=self.size_area,
-                                  resolution=resolution,
+                                  resolution=self.resolution,
                                   lidar=self.lidar())
     
 
 
-        self.frame_stack = 4
         self.frame_buffer = deque(maxlen=self.frame_stack)  
         self.state_buffer = deque(maxlen=self.frame_stack)
         # l'initialisé avec des images de la map
+
+        self.previous_command = {"forward": 0, "lateral": 0, "rotation": 0, "grasper": 0}
+
         
         for _ in range(self.frame_stack):
             self.frame_buffer.append(torch.zeros((1,2,self.grid.grid.shape[0], self.grid.grid.shape[1]), dtype=torch.float32, device=device))
             self.state_buffer.append(torch.zeros((1,6), dtype=torch.float32, device=device))
+        
         # Par défaut on load un model. Si on veut l'entrainer il faut redefinir policy net et value net        
         # Si model enregistré
             
         
         try : 
-            self.policy_model_path = "solutions/trained_models/run_lr_1e-06_episodes_2000_20250111-174625/policy_net.pth"
-            self.value_model_path = "solutions/trained_models/run_lr_1e-06_episodes_2000_20250111-174625/value_net.pth"
+            self.policy_model_path =os.path.join(PATH_TRAINED_MODEL,"policy_net.pth")
+            self.value_model_path = os.path.join(PATH_TRAINED_MODEL,"value_net.pth")
+
             self.policy_net = NetworkPolicy(h=self.grid.grid.shape[0],w=self.grid.grid.shape[1],frame_stack=self.frame_stack)
             self.value_net = NetworkValue(h=self.grid.grid.shape[0],w=self.grid.grid.shape[1],frame_stack=self.frame_stack)
             self.policy_net.load_state_dict(torch.load(self.policy_model_path,map_location=torch.device('cpu')))
@@ -100,7 +135,6 @@ class MyDroneHulk(DroneAbstract):
         self.flush_interval = 50  # Number of timesteps before flushing buffer
         self.timestep_count = 0  # Counter to track timesteps 
 
-         
     def define_message_for_all(self):
         """
         Here, we don't need communication...
@@ -110,16 +144,33 @@ class MyDroneHulk(DroneAbstract):
     def control(self):
         self.timestep_count +=1 
         self.update_map_pose_speed()
-        # print( f"EXPLORATION SCORE : {self.grid.exploration_score}")
-        maps = torch.tensor([self.grid.grid, self.grid.position_grid], dtype=torch.float32, device=device).unsqueeze(0)
-        global_state = torch.tensor([self.estimated_pose.position[0], self.estimated_pose.position[1], self.estimated_pose.orientation, self.estimated_pose.vitesse_X, self.estimated_pose.vitesse_Y, self.estimated_pose.vitesse_angulaire], dtype=torch.float32, device=device).unsqueeze(0)
-        self.frame_buffer.append(maps)
-        self.state_buffer.append(global_state)
-        stacked_frames = torch.cat(list(self.frame_buffer), dim=1)
-        stacked_states = torch.cat(list(self.state_buffer), dim=1)
-        #print(f" shape de global state stacked{stacked_states.shape}")
-        action,_ = self.select_action(stacked_frames,stacked_states)
-        command = self.process_actions(action)
+        self.showMaps(display_zoomed_position_grid = True,display_zoomed_grid = True)
+
+        if self.timestep_count % self.frame_skipping == 0:
+            #print( f"EXPLORATION SCORE : {self.grid.exploration_score}")
+            maps = torch.tensor([self.grid.grid, self.grid.position_grid], dtype=torch.float32, device=device).unsqueeze(0)
+            global_state = torch.tensor([self.estimated_pose.position[0], self.estimated_pose.position[1], self.estimated_pose.orientation, self.estimated_pose.vitesse_X, self.estimated_pose.vitesse_Y, self.estimated_pose.vitesse_angulaire], dtype=torch.float32, device=device).unsqueeze(0)
+            self.frame_buffer.append(maps)
+            self.state_buffer.append(global_state)
+            stacked_frames = torch.cat(list(self.frame_buffer), dim=1)
+            stacked_states = torch.cat(list(self.state_buffer), dim=1)
+            #print(f" shape de global state stacked{stacked_states.shape}")
+            action,_ = self.select_action(stacked_frames,stacked_states)
+            command = self.process_actions(action)
+            self.previous_command = command
+        else : 
+            command = self.previous_command
+        
+        found_wounded = self.process_semantic_sensor()
+        min_dist = self.process_lidar_sensor(self.lidar())
+        is_collision = min_dist < 10
+        reward = self.compute_reward(is_collision, found_wounded, 1,command)
+        # nulle commande 
+        #command = {"forward": 0, "lateral": 0, "rotation": 0, "grasper": 0}
+        print(f"time step : {self.timestep_count}")
+        print(f"Reward : {reward}")   
+        if self.timestep_count >= 300 : 
+            print("End of trainning")
         return command
 
     def process_semantic_sensor(self):
@@ -163,10 +214,13 @@ class MyDroneHulk(DroneAbstract):
         if found_wounded:
             reward += 100
 
-        reward += self.grid.exploration_score
-
+        if self.timestep_count < 70  : 
+            reward += int(self.grid.exploration_score/(1+70/(1+self.timestep_count)))
+        else : 
+            reward += self.grid.exploration_score
         # Penalize idling or lack of movement
         reward -= time_penalty
+
 
         # give penalty when action are initialy not between -0.9 and 0.9 
         if (abs(forward) < 0.95 and abs(lateral) < 0.95 and abs(rotation) < 0.95):

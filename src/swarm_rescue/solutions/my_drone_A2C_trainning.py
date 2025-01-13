@@ -47,9 +47,9 @@ class MyDroneHulk(DroneAbstract):
             
         # MAPING
         self.estimated_pose = Pose() # Fonctionne commant sans le GPS ?  erreur ou qu'est ce que cela retourne ? 
-        resolution = 8 # pourquoi ?  Ok bon compromis entre précision et temps de calcul
+        self.resolution = 8 # pourquoi ?  Ok bon compromis entre précision et temps de calcul
         self.grid = OccupancyGrid(size_area_world=self.size_area,
-                                  resolution=resolution,
+                                  resolution=self.resolution,
                                   lidar=self.lidar())
     
 
@@ -124,7 +124,10 @@ class MyDroneHulk(DroneAbstract):
         if found_wounded:
             reward += 100
 
-        reward += self.grid.exploration_score
+        if self.timestep_count < 70  : 
+            reward += int(self.grid.exploration_score/(1+70/(1+self.timestep_count)))
+        else : 
+            reward += self.grid.exploration_score
 
         # Penalize idling or lack of movement
         reward -= time_penalty

@@ -65,7 +65,7 @@ class DroneDataset:
 
 GAMMA = 0.99
 LEARNING_RATE = 3e-6
-ENTROPY_BETA = 0.03
+ENTROPY_BETA = 0.05
 NB_EPISODES = 2000
 MAX_STEPS = 64*5 # multiple du batch size c'est mieux sinon des fois on a des batchs pas de la même taille.
 BATCH_SIZE = 32 # prendre des puissance de 2
@@ -128,7 +128,7 @@ def optimize_batch(states_map_batch, states_vector_batch, actions_batch, returns
     policy_loss = -(log_probs * advantages).mean() 
     #print(log_probs)
     max_action_value = 1.0
-    penalty_weight = 1e1  # Reduced from 10000 to prevent overshadowing other losses
+    penalty_weight = 1e2  # Reduced from 10000 to prevent overshadowing other losses
     action_penalty = penalty_weight * torch.sum(torch.clamp(actions_batch.abs() - (max_action_value - 0.3), min=0) ** 2)
 
     # Entropy regularization
@@ -224,7 +224,7 @@ def select_action(policy_net, state_map, state_vector):
 
     return action.detach(), log_prob
 
-def train(n_frames_stack=2,n_frame_skip=4):
+def train(n_frames_stack=4,n_frame_skip=2,grid_resolution = 8):
     
     print("Training...")
 
@@ -241,13 +241,18 @@ def train(n_frames_stack=2,n_frame_skip=4):
         f.write(f"NB_EPISODES = {NB_EPISODES}\n")
         f.write(f"MAX_STEPS = {MAX_STEPS}\n")
         f.write(f"BATCH_SIZE = {BATCH_SIZE}\n")
-        f.write(f"frames_stack = {n_frames_stack}\n")
-        f.write(f"frame_skip = {n_frame_skip}\n")
+        f.write(f"frame_stacking = {n_frames_stack}\n")
+        f.write(f"frame_skipping = {n_frame_skip}\n")
+        f.write(f"grid_resolution = {grid_resolution}\n")
         f.write(f"Other hyperparams...\n")
 
     map_training = M1()
     playground = map_training.construct_playground(drone_type=MyDroneHulk)
+
+
+
     print("Using device:", device)
+
     policy_net = NetworkPolicy(h=map_training.drones[0].grid.grid.shape[0],w=map_training.drones[0].grid.grid.shape[1],frame_stack=n_frames_stack).to(device)
     value_net = NetworkValue(h=map_training.drones[0].grid.grid.shape[0],w=map_training.drones[0].grid.grid.shape[1],frame_stack=n_frames_stack).to(device)
 
@@ -267,7 +272,9 @@ def train(n_frames_stack=2,n_frame_skip=4):
         
         # resetting all needs to be done for each drone
         for drone in map_training.drones:
-            drone.grid.reset()
+            drone.grid = OccupancyGrid(size_area_world=drone.size_area,
+                                resolution=grid_resolution,
+                                lidar=drone.lidar()) # On reset la grille + mettre la bonne resolution.
             
             if drone in frame_buffers: 
                 frame_buffers[drone].clear()
@@ -364,6 +371,8 @@ def train(n_frames_stack=2,n_frame_skip=4):
         if any([drone.drone_health<=0 for drone in map_training.drones]):
             map_training = M1()
             playground = map_training.construct_playground(drone_type=MyDroneHulk)
+            
+
         
         # Optimize the policy and value networks in batches
         returns = compute_returns(rewards)
