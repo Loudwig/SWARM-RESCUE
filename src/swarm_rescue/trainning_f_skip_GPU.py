@@ -305,6 +305,7 @@ def train(n_frames_stack=4,n_frame_skip=2,grid_resolution = 8):
         step = 0
         actions_drones = {drone: drone.process_actions([0, 0, 0]) for drone in map_training.drones}  # Initialize with neutral actions
         total_reward = 0
+        done = False
 
 
         while not done and step < MAX_STEPS and all([drone.drone_health>0 for drone in map_training.drones]):
