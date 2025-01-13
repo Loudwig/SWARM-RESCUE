@@ -122,7 +122,7 @@ class MyDroneHulk(DroneAbstract):
             reward -= 50
 
         if found_wounded:
-            reward += 100
+            reward += 200
 
         if self.timestep_count < 70  : 
             reward += int(self.grid.exploration_score/(1+70/(1+self.timestep_count)))
