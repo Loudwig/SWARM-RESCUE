@@ -224,7 +224,7 @@ def select_action(policy_net, state_map, state_vector):
 
     return action.detach(), log_prob
 
-def train(n_frames_stack=4,n_frame_skip=2,grid_resolution = 8):
+def train(n_frames_stack=4,n_frame_skip=2,grid_resolution = 16):
     
     print("Training...")
 
@@ -249,12 +249,14 @@ def train(n_frames_stack=4,n_frame_skip=2,grid_resolution = 8):
     map_training = M1()
     playground = map_training.construct_playground(drone_type=MyDroneHulk)
 
-
-
     print("Using device:", device)
+    h_dummy = int(map_training.drones[0].grid.size_area_world[0] / grid_resolution
+                                   + 0.5)
+    w_dummy  = int(map_training.drones[0].grid.size_area_world[1] / grid_resolution
+                                   + 0.5)
 
-    policy_net = NetworkPolicy(h=map_training.drones[0].grid.grid.shape[0],w=map_training.drones[0].grid.grid.shape[1],frame_stack=n_frames_stack).to(device)
-    value_net = NetworkValue(h=map_training.drones[0].grid.grid.shape[0],w=map_training.drones[0].grid.grid.shape[1],frame_stack=n_frames_stack).to(device)
+    policy_net = NetworkPolicy(h=h_dummy,w=w_dummy,frame_stack=n_frames_stack).to(device)
+    value_net = NetworkValue(h=h_dummy,w=w_dummy,frame_stack=n_frames_stack).to(device)
 
     optimizer_policy = optim.Adam(policy_net.parameters(), lr=LEARNING_RATE)
     optimizer_value = optim.Adam(value_net.parameters(), lr=LEARNING_RATE)
