@@ -55,7 +55,6 @@ class Grid:
             for ind,y in np.ndenumerate(y_grid) :
                 y_grid[ind] = max(0,min(self.x_max_grid-1, y))
             
-        print(x_grid,y_grid)
         return x_grid, y_grid
 
     def _conv_grid_to_world(self, x_grid, y_grid):
