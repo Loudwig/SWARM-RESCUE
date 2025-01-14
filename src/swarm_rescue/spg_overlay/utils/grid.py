@@ -32,9 +32,6 @@ class Grid:
         x_grid = (x_world + self.size_area_world[0] / 2) / self.resolution
         y_grid = (-y_world + self.size_area_world[1] / 2) / self.resolution
 
-        print(x_grid,y_grid)        
-
-
 
         if isinstance(x_grid, float):
             x_grid = int(x_grid)
