@@ -181,13 +181,13 @@ class Grid:
         X, Y = u
         if X < 0 :
             X = 0
-        elif X >= self.grid.x_max_grid :
-            X = self.grid.x_max_grid - 1
+        elif X >= self.x_max_grid :
+            X = self.x_max_grid - 1
         else : pass  
         
         if Y < 0 :
             Y = 0
-        elif Y >= self.grid.y_max_grid:
-            Y = self.grid.y_max_grid - 1
+        elif Y >= self.y_max_grid:
+            Y = self.y_max_grid - 1
         else : pass
         return X,Y
