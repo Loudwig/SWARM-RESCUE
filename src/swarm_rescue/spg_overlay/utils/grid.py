@@ -39,7 +39,7 @@ class Grid:
             x_grid = x_grid.astype(int)
             y_grid = y_grid.astype(int)
 
-        x_grid,y_grid = self.verify_grid_pose((x_grid,y_grid))
+        x_grid,y_grid = self.verify_grid_pose(x_grid,y_grid)
         
         return x_grid, y_grid
 
@@ -177,8 +177,9 @@ class Grid:
         cv2.imshow(title, img_color)
         cv2.waitKey(1)
 
-    def verify_grid_pose(self,u = (int,int)):
-        X, Y = u
+    def verify_grid_pose(self,Ux,Uy):
+        X = Ux
+        Y = Uy
         if X < 0 :
             X = 0
         elif X >= self.x_max_grid :
