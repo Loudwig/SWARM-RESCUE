@@ -231,4 +231,5 @@ class MyDroneHulk(DroneAbstract):
         state_tensor = torch.tensor([Px,Py,orientation,vitesse_X,vitesse_Y,vitesse_angulaire], dtype=torch.float32, device=device)
         #print("state tensor", state_tensor)
         return state_tensor
-
+    
+    

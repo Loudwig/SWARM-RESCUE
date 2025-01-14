@@ -39,6 +39,8 @@ class Grid:
             x_grid = x_grid.astype(int)
             y_grid = y_grid.astype(int)
 
+        x_grid,y_grid = self.verify_grid_pose((x_grid,y_grid))
+        
         return x_grid, y_grid
 
     def _conv_grid_to_world(self, x_grid, y_grid):
@@ -174,3 +176,18 @@ class Grid:
                         color=(0, 0, 255), thickness=2)
         cv2.imshow(title, img_color)
         cv2.waitKey(1)
+
+    def verify_grid_pose(self,u = (int,int)):
+        X, Y = u
+        if X < 0 :
+            X = 0
+        elif X >= self.grid.x_max_grid :
+            X = self.grid.x_max_grid - 1
+        else : pass  
+        
+        if Y < 0 :
+            Y = 0
+        elif Y >= self.grid.y_max_grid:
+            Y = self.grid.y_max_grid - 1
+        else : pass
+        return X,Y
