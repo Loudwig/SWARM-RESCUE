@@ -32,15 +32,30 @@ class Grid:
         x_grid = (x_world + self.size_area_world[0] / 2) / self.resolution
         y_grid = (-y_world + self.size_area_world[1] / 2) / self.resolution
 
+        print(x_grid,y_grid)        
+
+
+
         if isinstance(x_grid, float):
             x_grid = int(x_grid)
+
+            x_grid = max(0,min(self.x_max_grid-1, x_grid))
+
             y_grid = int(y_grid)
+            y_grid = max(0,min(self.y_max_grid -1, y_grid))
+
+        
         elif isinstance(x_grid, np.ndarray):
             x_grid = x_grid.astype(int)
             y_grid = y_grid.astype(int)
 
-        x_grid,y_grid = self.verify_grid_pose(x_grid,y_grid)
-        
+            for ind,x in np.ndenumerate(x_grid) : 
+                # si en dehors de la borne de la grille on la cap
+                x_grid[ind] = max(0,min(self.x_max_grid-1, x))
+            for ind,y in np.ndenumerate(y_grid) :
+                y_grid[ind] = max(0,min(self.x_max_grid-1, y))
+            
+        print(x_grid,y_grid)
         return x_grid, y_grid
 
     def _conv_grid_to_world(self, x_grid, y_grid):
@@ -180,6 +195,7 @@ class Grid:
     def verify_grid_pose(self,Ux,Uy):
         X = Ux
         Y = Uy
+        print(X,Y)
         if X < 0 :
             X = 0
         elif X >= self.x_max_grid :
