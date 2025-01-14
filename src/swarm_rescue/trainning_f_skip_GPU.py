@@ -65,7 +65,7 @@ class DroneDataset:
 
 GAMMA = 0.99
 LEARNING_RATE = 3e-6
-ENTROPY_BETA = 0.05
+ENTROPY_BETA = 0.15
 NB_EPISODES = 2000
 MAX_STEPS = 64*5 # multiple du batch size c'est mieux sinon des fois on a des batchs pas de la même taille.
 BATCH_SIZE = 32 # prendre des puissance de 2
@@ -224,7 +224,7 @@ def select_action(policy_net, state_map, state_vector):
 
     return action.detach(), log_prob
 
-def train(n_frames_stack=4,n_frame_skip=2,grid_resolution = 16):
+def train(n_frames_stack=4,n_frame_skip=1,grid_resolution = 8):
     
     print("Training...")
 
