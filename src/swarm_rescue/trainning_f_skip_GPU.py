@@ -172,14 +172,10 @@ def select_action(policy_net, state_map, state_vector):
     elif isinstance(state_map, torch.Tensor):
         #print('State_map is already a tensor.')
         pass
-    #print('State map shape before processing:', state_map.shape)
 
     if not isinstance(state_map, torch.Tensor):
         state_map = torch.FloatTensor(state_map)  # Convert to tensor if not already
     state_map = state_map  # Ensure it's on the correct device
-
-    #print('State map shape after processing:', state_map.shape)
-    #print('State map device:', state_map.device)
 
     # Debugging and type-checking for state_vector
     if isinstance(state_vector, list):
@@ -188,21 +184,17 @@ def select_action(policy_net, state_map, state_vector):
     elif isinstance(state_vector, torch.Tensor):
         #print('State_vector is already a tensor.')
         pass
-    #print('State vector shape before processing:', state_vector.shape)
 
     if not isinstance(state_vector, torch.Tensor):
         state_vector = torch.FloatTensor(state_vector)  # Convert to tensor if not already
     state_vector = state_vector  # Ensure it's on the correct device
-
-    #print('State vector shape after processing:', state_vector.shape)
-    #print('State vector device:', state_vector.device)
 
     # Policy network forward pass
     means, log_stds = policy_net(state_map, state_vector)
 
     # Sample continuous actions
     stds = torch.exp(log_stds)
-    sampled_continuous_actions = means + torch.randn_like(means) * stds
+    sampled_continuous_actions = means + torch.randn_like(means) * stds # utilisation de rsample ? 
     continuous_actions = torch.tanh(sampled_continuous_actions)
 
     # Compute log probabilities
@@ -227,6 +219,7 @@ def select_action(policy_net, state_map, state_vector):
 def train(n_frames_stack=4,n_frame_skip=1,grid_resolution = 8):
     
     print("Training...")
+    print("Using device:", device)
 
     # Create a unique folder name based on hyperparameters and timestamp
     current_time = time.strftime("%Y%m%d-%H%M%S")
@@ -249,7 +242,6 @@ def train(n_frames_stack=4,n_frame_skip=1,grid_resolution = 8):
     map_training = M1()
     playground = map_training.construct_playground(drone_type=MyDroneHulk)
 
-    print("Using device:", device)
     h_dummy = int(map_training.drones[0].grid.size_area_world[0] / grid_resolution
                                    + 0.5)
     w_dummy  = int(map_training.drones[0].grid.size_area_world[1] / grid_resolution
