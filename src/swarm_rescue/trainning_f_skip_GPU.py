@@ -311,9 +311,9 @@ def train(n_frames_stack=4,n_frame_skip=1,grid_resolution = 8):
                     #drone.showMaps(display_zoomed_position_grid=True, display_zoomed_grid=True)
                     
                     # Get current frame
-                    maps = torch.tensor([drone.grid.grid, drone.grid.position_grid], 
-                                    dtype=torch.float32, device=device).unsqueeze(0)
-                    
+                    maps = torch.from_numpy(np.stack((drone.grid.grid, drone.grid.position_grid),axis=0)).unsqueeze(0)
+                    maps = maps.float()
+                    #print(f"shape of the maps : {maps.shape}")
 
                     global_state = drone.process_state_before_network(drone.estimated_pose.position[0],
                         drone.estimated_pose.position[1],

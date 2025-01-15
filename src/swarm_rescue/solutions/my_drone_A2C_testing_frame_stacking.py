@@ -148,7 +148,8 @@ class MyDroneHulk(DroneAbstract):
 
         if self.timestep_count % self.frame_skipping == 0:
             #print( f"EXPLORATION SCORE : {self.grid.exploration_score}")
-            maps = torch.tensor([self.grid.grid, self.grid.position_grid], dtype=torch.float32, device=device).unsqueeze(0)
+            maps = torch.from_numpy(np.stack((self.grid.grid, self.grid.position_grid),axis=0)).unsqueeze(0)
+            maps = maps.float()            
             global_state = torch.tensor([self.estimated_pose.position[0], self.estimated_pose.position[1], self.estimated_pose.orientation, self.estimated_pose.vitesse_X, self.estimated_pose.vitesse_Y, self.estimated_pose.vitesse_angulaire], dtype=torch.float32, device=device).unsqueeze(0)
             self.frame_buffer.append(maps)
             self.state_buffer.append(global_state)
