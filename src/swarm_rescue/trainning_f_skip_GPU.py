@@ -64,7 +64,7 @@ class DroneDataset:
         return self.states_maps[idx], self.states_vectors[idx], self.actions[idx], self.returns[idx]
 
 GAMMA = 0.99
-LEARNING_RATE = 3e-6
+LEARNING_RATE = 1e-5
 ENTROPY_BETA = 0.15
 NB_EPISODES = 2000
 MAX_STEPS = 64*5 # multiple du batch size c'est mieux sinon des fois on a des batchs pas de la même taille.
@@ -128,7 +128,7 @@ def optimize_batch(states_map_batch, states_vector_batch, actions_batch, returns
     policy_loss = -(log_probs * advantages).mean() 
     #print(log_probs)
     max_action_value = 1.0
-    penalty_weight = 1e2  # Reduced from 10000 to prevent overshadowing other losses
+    penalty_weight = 0.1  # Reduced from 10000 to prevent overshadowing other losses
     action_penalty = penalty_weight * torch.sum(torch.clamp(actions_batch.abs() - (max_action_value - 0.3), min=0) ** 2)
 
     # Entropy regularization
@@ -139,7 +139,7 @@ def optimize_batch(states_map_batch, states_vector_batch, actions_batch, returns
     value_loss = nn.functional.mse_loss(values, returns_batch)
 
     # L2 regularization (weight decay)
-    l2_lambda = 1e1
+    l2_lambda = 1e-4
     l2_policy_loss = sum(torch.sum(param ** 2) for param in policy_net.parameters())
     l2_value_loss = sum(torch.sum(param ** 2) for param in value_net.parameters())
 
@@ -322,6 +322,7 @@ def train(n_frames_stack=4,n_frame_skip=1,grid_resolution = 8):
                         drone.estimated_pose.vitesse_Y,
                         drone.estimated_pose.vitesse_angulaire)
                     
+
                     # Update frame buffer
                     frame_buffers[drone].append(maps)
                     global_state_buffer[drone].append(global_state) # global_state_buffer[drone] = deque([tensor([x,y,...],tensor([..],))]
