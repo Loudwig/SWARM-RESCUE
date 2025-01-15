@@ -67,7 +67,7 @@ GAMMA = 0.99
 LEARNING_RATE = 1e-5
 ENTROPY_BETA = 0.15
 NB_EPISODES = 2000
-MAX_STEPS = 64*5 # multiple du batch size c'est mieux sinon des fois on a des batchs pas de la même taille.
+MAX_STEPS = 64*4 # multiple du batch size c'est mieux sinon des fois on a des batchs pas de la même taille.
 BATCH_SIZE = 32 # prendre des puissance de 2
 
 LossValue = []
@@ -312,7 +312,7 @@ def train(n_frames_stack=4,n_frame_skip=1,grid_resolution = 8):
                     
                     # Get current frame
                     maps = torch.from_numpy(np.stack((drone.grid.grid, drone.grid.position_grid),axis=0)).unsqueeze(0)
-                    maps = maps.float()
+                    maps = maps.float().to(device)
                     #print(f"shape of the maps : {maps.shape}")
 
                     global_state = drone.process_state_before_network(drone.estimated_pose.position[0],
