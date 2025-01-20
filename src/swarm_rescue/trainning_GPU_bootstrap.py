@@ -33,7 +33,7 @@ from solutions.my_drone_A2C_trainning import MyDroneHulk
 
 from torch.utils.data import Dataset, DataLoader
 
-device = torch.device('cuda:2' if torch.cuda.is_available() else 'cpu')
+device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 torch.set_default_device(device)
 generator = torch.Generator(device=device)
 

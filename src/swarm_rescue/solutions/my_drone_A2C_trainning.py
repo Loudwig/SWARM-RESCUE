@@ -12,7 +12,7 @@ import torch.nn as nn
 import torch.optim as optim
 
 
-device = torch.device('cuda:2' if torch.cuda.is_available() else 'cpu')
+device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 torch.set_default_device(device)
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
