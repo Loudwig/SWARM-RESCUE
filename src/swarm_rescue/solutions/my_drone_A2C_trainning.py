@@ -134,7 +134,8 @@ class MyDroneHulk(DroneAbstract):
 
         # give penalty when action are initialy not between -0.9 and 0.9 
         if (abs(forward) < 0.5 and abs(lateral) < 0.5 and abs(rotation) < 0.5):
-            print("actions not saturated")
+            #print("actions not saturated")
+            pass
             
         return reward
 
