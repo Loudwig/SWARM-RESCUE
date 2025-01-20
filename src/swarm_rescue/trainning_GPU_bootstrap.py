@@ -28,7 +28,7 @@ from solutions.utils.pose import Pose
 from solutions.utils.grid import OccupancyGrid
 from solutions.utils.astar import *
 from solutions.utils.NetworkPolicy import NetworkPolicy
-from solutions.utils.NetworkValue import NetworkValue
+from solutions.utils.NetworkValuebootstrap import NetworkValue
 from solutions.my_drone_A2C_trainning import MyDroneHulk
 
 from torch.utils.data import Dataset, DataLoader
@@ -216,7 +216,7 @@ def select_action(policy_net, state_map, state_vector):
 
     return action.detach(), log_prob
 
-def train(n_frames_stack=4,n_frame_skip=1,grid_resolution = 8):
+def train(n_frames_stack=1,n_frame_skip=1,grid_resolution = 8):
     
     print("Training bootstrap")
     print("Using device:", device)
@@ -248,7 +248,7 @@ def train(n_frames_stack=4,n_frame_skip=1,grid_resolution = 8):
                                    + 0.5)
 
     policy_net = NetworkPolicy(h=h_dummy,w=w_dummy,frame_stack=n_frames_stack).to(device)
-    value_net = NetworkValue(h=h_dummy,w=w_dummy,frame_stack=n_frames_stack).to(device)
+    value_net = NetworkValue(h=h_dummy,w=w_dummy).to(device)
 
     optimizer_policy = optim.Adam(policy_net.parameters(), lr=LEARNING_RATE)
     optimizer_value = optim.Adam(value_net.parameters(), lr=LEARNING_RATE)
@@ -294,6 +294,8 @@ def train(n_frames_stack=4,n_frame_skip=1,grid_resolution = 8):
         # initialisations    
         states_map = []
         states_vector = []
+        next_states_map = []
+        next_states_vector = []
         actions = []
         rewards = []
         step = 0
@@ -358,8 +360,10 @@ def train(n_frames_stack=4,n_frame_skip=1,grid_resolution = 8):
                         drone.estimated_pose.orientation,
                         drone.estimated_pose.vitesse_X,
                         drone.estimated_pose.vitesse_Y,
-                        drone.estimated_pose.vitesse_angulaire)
+                        drone.estimated_pose.vitesse_angulaire).unsqueeze(0)
                     
+                    
+
                     value_next = value_net(next_maps, next_global_state).squeeze()
 
 
@@ -369,7 +373,7 @@ def train(n_frames_stack=4,n_frame_skip=1,grid_resolution = 8):
                     is_collision = min_dist < 10
                     
                     reward = drone.compute_reward(is_collision, found_wounded, 1,actions_drones[drone])
-                    target = reward + GAMMA * value_next
+                    target = reward + GAMMA*value_next
                     rewards.append(target)
                     
                     total_reward += reward
@@ -389,7 +393,7 @@ def train(n_frames_stack=4,n_frame_skip=1,grid_resolution = 8):
 
         
         # Optimize the policy and value networks in batches
-        returns = compute_returns(rewards)
+        returns = rewards
         rewards_per_episode.append(total_reward)
 
         dataset = DroneDataset(states_map, states_vector, actions, returns)
