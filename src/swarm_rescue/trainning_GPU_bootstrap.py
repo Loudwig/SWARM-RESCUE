@@ -119,7 +119,7 @@ def optimize_batch(states_map_batch, states_vector_batch, actions_batch, returns
     log_probs = log_probs_continuous - tanh_correction
 
     # Compute advantages with proper normalization
-    advantages = returns_batch - values.detach()
+    advantages = returns_batch.detach() - values.detach()
     
     # if advantages.numel() > 1:
     #     advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
