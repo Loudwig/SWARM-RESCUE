@@ -27,7 +27,7 @@ from solutions.my_drone_turningV2 import MyDroneTurningV2
 from solutions.my_dronewalletienne import MyDroneWall
 from solutions.my_drone_basic_mapping import MyDroneBasic
 from solutions.my_drone_nogps_mapping import MyDroneNoGps
-from solutions.my_drone_A2C_testing_frame_stacking import MyDroneHulk
+from solutions.my_drone_A2C_testing_bootstrap import MyDroneHulk
 
 
 
