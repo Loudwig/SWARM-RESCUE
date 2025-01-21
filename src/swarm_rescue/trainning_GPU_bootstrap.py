@@ -66,7 +66,7 @@ class DroneDataset:
 GAMMA = 0.99
 LEARNING_RATE = 1e-5
 ENTROPY_BETA = 0.15
-NB_EPISODES = 200
+NB_EPISODES = 1000
 MAX_STEPS = 64*4 # multiple du batch size c'est mieux sinon des fois on a des batchs pas de la même taille.
 BATCH_SIZE = 32 # prendre des puissance de 2
 
@@ -129,7 +129,7 @@ def optimize_batch(states_map_batch, states_vector_batch, actions_batch, returns
     value_loss = nn.functional.mse_loss(values, returns_batch)
 
     # L2 regularization (weight decay)
-    l2_lambda = 1e-4
+    l2_lambda = 1e-6
     l2_policy_loss = sum(torch.sum(param ** 2) for param in policy_net.parameters())
     l2_value_loss = sum(torch.sum(param ** 2) for param in value_net.parameters())
 
