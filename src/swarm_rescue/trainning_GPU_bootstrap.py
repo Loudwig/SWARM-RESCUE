@@ -362,8 +362,8 @@ def train(n_frames_stack=1,n_frame_skip=1,grid_resolution = 8):
                         drone.estimated_pose.vitesse_angulaire).unsqueeze(0)
                     
                     
-
-                    value_next = value_net(next_maps, next_global_state).squeeze()
+                    with torch.no_grad():
+                        value_next = value_net(next_maps, next_global_state).squeeze()
 
 
                     found_wounded = drone.process_semantic_sensor()
