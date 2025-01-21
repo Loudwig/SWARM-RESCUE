@@ -111,8 +111,8 @@ def optimize_batch(states_map_batch, states_vector_batch, actions_batch, returns
     # Compute advantages with proper normalization
     advantages = returns_batch.detach() - values.detach()
     
-    # if advantages.numel() > 1:
-    #     advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+    if advantages.numel() > 1:
+         advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
     # Policy loss with proper scaling
     policy_loss = -(log_probs * advantages).mean() 
