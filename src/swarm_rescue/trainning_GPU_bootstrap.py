@@ -66,7 +66,7 @@ class DroneDataset:
 GAMMA = 0.99
 LEARNING_RATE = 1e-5
 ENTROPY_BETA = 0.15
-NB_EPISODES = 2000
+NB_EPISODES = 200
 MAX_STEPS = 64*4 # multiple du batch size c'est mieux sinon des fois on a des batchs pas de la même taille.
 BATCH_SIZE = 32 # prendre des puissance de 2
 
@@ -78,16 +78,6 @@ LossWeightsValue = []
 LossExploration = []
 LossWeightsPolicy = []
 
-
-def compute_returns(rewards):
-    returns = []
-    g = 0
-    for reward in reversed(rewards):
-        g = (reward + GAMMA * g) # la somme ne va pas jusqu'à l'infini donc il faut peut être normalisé sinon les derniers termes ont beacoup moins de "puissance"
-        returns.insert(0, g)
-    #print("returns",returns)
-    #print(len(returns))
-    return returns # longeur du nombre de steps
 
 def optimize_batch(states_map_batch, states_vector_batch, actions_batch, returns_batch, 
                   policy_net, value_net, optimizer_policy, optimizer_value, device):
