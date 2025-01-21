@@ -148,6 +148,7 @@ def optimize_batch(states_map_batch, states_vector_batch, actions_batch, returns
     # Backpropagation
     optimizer_policy.zero_grad()
     total_policy_loss.backward()
+    torch.nn.utils.clip_grad_norm_(policy_net.parameters(), max_norm=0.5)
     optimizer_policy.step()
 
     optimizer_value.zero_grad()
