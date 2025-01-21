@@ -129,7 +129,7 @@ def optimize_batch(states_map_batch, states_vector_batch, actions_batch, returns
     value_loss = nn.functional.mse_loss(values, returns_batch)
 
     # L2 regularization (weight decay)
-    l2_lambda = 1e-6
+    l2_lambda = 1e-5
     l2_policy_loss = sum(torch.sum(param ** 2) for param in policy_net.parameters())
     l2_value_loss = sum(torch.sum(param ** 2) for param in value_net.parameters())
 
@@ -148,11 +148,19 @@ def optimize_batch(states_map_batch, states_vector_batch, actions_batch, returns
     # Backpropagation
     optimizer_policy.zero_grad()
     total_policy_loss.backward()
-    torch.nn.utils.clip_grad_norm_(policy_net.parameters(), max_norm=0.5)
+    total_norm = 0.0
+    for p in policy_net.parameters():
+        if p.grad is not None:
+            param_norm = p.grad.data.norm(2)
+            total_norm += param_norm.item()**2
+    total_norm = total_norm**0.5
+    #print(f"[DEBUG] Norme L2 du gradient Policy = {total_norm:.4f}")
+    #torch.nn.utils.clip_grad_norm_(policy_net.parameters(), max_norm=0.5)
     optimizer_policy.step()
 
     optimizer_value.zero_grad()
     value_loss.backward()
+    #torch.nn.utils.clip_grad_norm_(value_net.parameters(), max_norm=0.5)
     optimizer_value.step()
 
 def select_action(policy_net, state_map, state_vector):
@@ -395,12 +403,10 @@ def train(n_frames_stack=1,n_frame_skip=1,grid_resolution = 8):
 
         del states_map,states_vector, actions, rewards
         
-        if episode % 5 == 1:
-            print(f"Episode {episode}, Reward: {total_reward}, Mean Last 5 Rewards: {np.mean(rewards_per_episode[-5:])}")
-            #torch.save(policy_net.state_dict(), 'solutions/utils/trained_models/policy_net.pth')
-            #torch.save(value_net.state_dict(), 'solutions/utils/trained_models/value_net.pth')
+        if episode % 10 == 1:
+            print(f"Episode {episode}, Reward: {total_reward}, Mean Last 10 Rewards: {np.mean(rewards_per_episode[-10:])}")
             
-        if np.mean(rewards_per_episode[-5:]) > 10000:
+        if np.mean(rewards_per_episode[-10:]) > 10000:
             print(f"Training solved in {episode} episodes!")
             break
     

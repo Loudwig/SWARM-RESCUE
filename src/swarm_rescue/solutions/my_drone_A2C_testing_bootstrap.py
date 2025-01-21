@@ -30,7 +30,7 @@ from solutions.utils.NetworkValuebootstrap import NetworkValue
 import os
 
 
-PATH_TRAINED_MODEL = "solutions/trained_models/run_lr_1e-05_episodes_200_20250121-134733"
+PATH_TRAINED_MODEL = "solutions/trained_models/run_lr_1e-05_episodes_1000_20250121-144507"
 
 class MyDroneHulk(DroneAbstract):
     class State(Enum):
