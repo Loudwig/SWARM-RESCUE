@@ -412,7 +412,7 @@ def train(n_frames_stack=1,n_frame_skip=1,grid_resolution = 8):
                     drone.update_map_pose_speed()
             
             if step % UPDATE_VALUE_NET_PERIOD == 0 : 
-                print(f"updating value at step {step}")
+                #print(f"updating value at step {step}")
                 rewards_value = rewards[-UPDATE_VALUE_NET_PERIOD:]
                 states_map_value = states_map[-UPDATE_VALUE_NET_PERIOD:]
                 states_vector_value = states_vector[-UPDATE_VALUE_NET_PERIOD:]
