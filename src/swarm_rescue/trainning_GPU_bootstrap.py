@@ -352,7 +352,7 @@ def train(n_frames_stack=1,n_frame_skip=1,grid_resolution = 8):
                 #print(i)
                 for drone in map_training.drones:
                     drone.timestep_count = step
-                    drone.showMaps(display_zoomed_position_grid=True, display_zoomed_grid=True)
+                    #drone.showMaps(display_zoomed_position_grid=True, display_zoomed_grid=True)
                     actions_drones = {drone: drone.process_actions([0, 0, i]) for drone in map_training.drones}
                     drone.update_map_pose_speed()
                 playground.step(actions_drones)
@@ -361,7 +361,7 @@ def train(n_frames_stack=1,n_frame_skip=1,grid_resolution = 8):
                 if step % n_frame_skip == 0:
                     for drone in map_training.drones:
                         drone.timestep_count = step
-                        drone.showMaps(display_zoomed_position_grid=True, display_zoomed_grid=True)
+                        #drone.showMaps(display_zoomed_position_grid=True, display_zoomed_grid=True)
                         
                         # Get current frame
                         current_maps = torch.from_numpy(np.stack((drone.grid.grid, drone.grid.position_grid),axis=0)).unsqueeze(0)
