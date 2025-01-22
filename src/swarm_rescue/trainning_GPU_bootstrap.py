@@ -357,7 +357,7 @@ def train(n_frames_stack=1,n_frame_skip=1,grid_resolution = 8):
                     drone.update_map_pose_speed()
                 playground.step(actions_drones)
             else : 
-                print("Moving")
+                #print("Moving")
                 if step % n_frame_skip == 0:
                     for drone in map_training.drones:
                         drone.timestep_count = step
