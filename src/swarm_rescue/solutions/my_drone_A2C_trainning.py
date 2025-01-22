@@ -124,10 +124,11 @@ class MyDroneHulk(DroneAbstract):
         if found_wounded:
             reward += 600
 
-        if self.timestep_count < 70  : 
-            reward += int(self.grid.exploration_score/(1+70/(1+self.timestep_count)))
-        else : 
-            reward += self.grid.exploration_score
+        # if self.timestep_count < 70  : 
+        #     reward += int(self.grid.exploration_score/(1+70/(1+self.timestep_count)))
+        # else : 
+        
+        reward += self.grid.exploration_score
 
         # Penalize idling or lack of movement
         reward -= time_penalty
