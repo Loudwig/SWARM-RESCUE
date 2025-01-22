@@ -14,6 +14,7 @@ import matplotlib.pyplot as plt
 import time
 import os
 import csv
+import random
 
 
 from maps.map_intermediate_01 import MyMapIntermediate01 as M1
@@ -64,13 +65,13 @@ class DroneDataset:
         return self.states_maps[idx], self.states_vectors[idx], self.actions[idx], self.returns[idx]
 
 GAMMA = 0.99
-LEARNING_RATE = 5e-6
+LEARNING_RATE = 1e-5
 ENTROPY_BETA = 0.15
-NB_EPISODES = 2000
+NB_EPISODES = 500
 MAX_STEPS = 64*4 # multiple du batch size c'est mieux sinon des fois on a des batchs pas de la même taille.
 BATCH_SIZE = 32 # prendre des puissance de 2
-UPDATE_VALUE_NET_PERIOD = 64
-BATCH_SIZE_VALUE = 32
+UPDATE_VALUE_NET_PERIOD = 64 # periode d'update du value netork pendant un episode (le policy network lui ne s'update que à la fin de l'épisode)
+BATCH_SIZE_VALUE = 32 # batch size pour l'update du value network
 
 LossValue = []
 LossPolicy = []
@@ -83,7 +84,16 @@ LossWeightsPolicy = []
 
 def optimize_batch(states_map_batch, states_vector_batch, actions_batch, returns_batch, 
                   policy_net, value_net, optimizer_policy, optimizer_value, device,mode):
+    """
+    Optimize networks based on collected experience
     
+    Args:
+        mode (str): Update mode
+            - "both": Update both policy and value networks
+            - "value": Update only value network
+            - "policy": Update only policy network
+    """
+
     if mode == "both" : 
         # Move tensors to device and ensure proper dimensions
         states_map_batch = states_map_batch.to(device)
@@ -331,98 +341,119 @@ def train(n_frames_stack=1,n_frame_skip=1,grid_resolution = 8):
 
         while not done and step < MAX_STEPS and all([drone.drone_health>0 for drone in map_training.drones]):
             step += 1
-            
-            if step % n_frame_skip == 0:
+            # attendre 30 steps avant de commencer à bouger
+            if step < 70:
+                #print("Waiting")
+                
+                if step < 50 : 
+                    i = random.random()
+                else : 
+                    i = 0
+                #print(i)
                 for drone in map_training.drones:
                     drone.timestep_count = step
                     #drone.showMaps(display_zoomed_position_grid=True, display_zoomed_grid=True)
-                    
-                    # Get current frame
-                    current_maps = torch.from_numpy(np.stack((drone.grid.grid, drone.grid.position_grid),axis=0)).unsqueeze(0)
-                    current_maps = current_maps.float().to(device)
-                    #print(f"shape of the maps : {maps.shape}")
-
-                    current_global_state = drone.process_state_before_network(drone.estimated_pose.position[0],
-                        drone.estimated_pose.position[1],
-                        drone.estimated_pose.orientation,
-                        drone.estimated_pose.vitesse_X,
-                        drone.estimated_pose.vitesse_Y,
-                        drone.estimated_pose.vitesse_angulaire)
-                    
-
-                    # Update frame buffer
-                    frame_buffers[drone].append(current_maps)
-                    global_state_buffer[drone].append(current_global_state) # global_state_buffer[drone] = deque([tensor([x,y,...],tensor([..],))]
-                    # Stack frames for network input
-                    stacked_frames = torch.cat(list(frame_buffers[drone]), dim=1)
-                    # Stack global states for network input
-                    stacked_global_states = torch.cat(list(global_state_buffer[drone])).unsqueeze(0) # global_states = tensor([x1,y1,..,x2,y2,...) dim = 
-                    
-                    states_map.append(stacked_frames)
-                    states_vector.append(stacked_global_states)
-                    
-                    #print(f"states vector{type(states_vector)}")
-                    # Select action using stacked frames
-                    action, _ = select_action(policy_net, stacked_frames, stacked_global_states)
-                    # action : tensor([1,-1,1])
-                    actions_drones[drone] = drone.process_actions(action)
-                    actions.append(action)
-            
-            
-            playground.step(actions_drones)
-            
-            if step % n_frame_skip == 0:
-                for drone in map_training.drones:
-                    
-                    # ON uptdate la map après l'action
-                    drone.update_map_pose_speed() # conséquence de l'action
-
-                    # calculate new state s'
-                    next_maps = torch.from_numpy(np.stack((drone.grid.grid, drone.grid.position_grid),axis=0)).unsqueeze(0)
-                    next_maps = next_maps.float().to(device)
-                    next_global_state = drone.process_state_before_network(drone.estimated_pose.position[0],
-                        drone.estimated_pose.position[1],
-                        drone.estimated_pose.orientation,
-                        drone.estimated_pose.vitesse_X,
-                        drone.estimated_pose.vitesse_Y,
-                        drone.estimated_pose.vitesse_angulaire).unsqueeze(0)
-                    
-                    
-                    with torch.no_grad():
-                        value_next = value_net(next_maps, next_global_state).squeeze()
-
-
-                    found_wounded = drone.process_semantic_sensor()
-                    done = found_wounded
-                    min_dist = drone.process_lidar_sensor(drone.lidar())
-                    is_collision = min_dist < 10
-                    
-                    reward = drone.compute_reward(is_collision, found_wounded, 1,actions_drones[drone])
-                    target = reward + GAMMA*value_next
-                    rewards.append(target)
-                    
-                    total_reward += reward
-
-                    
-                    if done:
-                        print("found wounded !")
-
-            else : 
-                for drone in map_training.drones:
+                    actions_drones = {drone: drone.process_actions([0, 0, i]) for drone in map_training.drones}
                     drone.update_map_pose_speed()
-            
-            if step % UPDATE_VALUE_NET_PERIOD == 0 : 
-                #print(f"updating value at step {step}")
-                rewards_value = rewards[-UPDATE_VALUE_NET_PERIOD:]
-                states_map_value = states_map[-UPDATE_VALUE_NET_PERIOD:]
-                states_vector_value = states_vector[-UPDATE_VALUE_NET_PERIOD:]
-                actions_vector_value = actions[-UPDATE_VALUE_NET_PERIOD:]
-                dataset = DroneDataset(states_map_value, states_vector_value, actions_vector_value, rewards_value)
-                data_loader = DataLoader(dataset, batch_size=BATCH_SIZE_VALUE, shuffle=True,generator = generator)
-                for batch in data_loader:
-                    states_map_b, states_vector_b, actions_b, returns_b = batch
-                    optimize_batch(states_map_b, states_vector_b, actions_b, returns_b, policy_net, value_net, optimizer_policy, optimizer_value, device,"value")
+                playground.step(actions_drones)
+            else : 
+                print("Moving")
+                if step % n_frame_skip == 0:
+                    for drone in map_training.drones:
+                        drone.timestep_count = step
+                        #drone.showMaps(display_zoomed_position_grid=True, display_zoomed_grid=True)
                         
+                        # Get current frame
+                        current_maps = torch.from_numpy(np.stack((drone.grid.grid, drone.grid.position_grid),axis=0)).unsqueeze(0)
+                        current_maps = current_maps.float().to(device)
+                        #print(f"shape of the maps : {maps.shape}")
+
+                        current_global_state = drone.process_state_before_network(drone.estimated_pose.position[0],
+                            drone.estimated_pose.position[1],
+                            drone.estimated_pose.orientation,
+                            drone.estimated_pose.vitesse_X,
+                            drone.estimated_pose.vitesse_Y,
+                            drone.estimated_pose.vitesse_angulaire)
+                        
+
+                        # Update frame buffer
+                        frame_buffers[drone].append(current_maps)
+                        global_state_buffer[drone].append(current_global_state) # global_state_buffer[drone] = deque([tensor([x,y,...],tensor([..],))]
+                        # Stack frames for network input
+                        stacked_frames = torch.cat(list(frame_buffers[drone]), dim=1)
+                        # Stack global states for network input
+                        stacked_global_states = torch.cat(list(global_state_buffer[drone])).unsqueeze(0) # global_states = tensor([x1,y1,..,x2,y2,...) dim = 
+                        
+                        states_map.append(stacked_frames)
+                        states_vector.append(stacked_global_states)
+                        
+                        #print(f"states vector{type(states_vector)}")
+                        # Select action using stacked frames
+                        action, _ = select_action(policy_net, stacked_frames, stacked_global_states)
+                        # action : tensor([1,-1,1])
+                        actions_drones[drone] = drone.process_actions(action)
+                        actions.append(action)
+                
+                
+                playground.step(actions_drones)
+                
+                if step % n_frame_skip == 0:
+                    for drone in map_training.drones:
+                        
+                        # ON uptdate la map après l'action
+                        drone.update_map_pose_speed() # conséquence de l'action
+
+                        # calculate new state s'
+                        next_maps = torch.from_numpy(np.stack((drone.grid.grid, drone.grid.position_grid),axis=0)).unsqueeze(0)
+                        next_maps = next_maps.float().to(device)
+                        next_global_state = drone.process_state_before_network(drone.estimated_pose.position[0],
+                            drone.estimated_pose.position[1],
+                            drone.estimated_pose.orientation,
+                            drone.estimated_pose.vitesse_X,
+                            drone.estimated_pose.vitesse_Y,
+                            drone.estimated_pose.vitesse_angulaire).unsqueeze(0)
+                        
+                        
+                        with torch.no_grad():
+                            value_next = value_net(next_maps, next_global_state).squeeze()
+
+
+                        found_wounded = drone.process_semantic_sensor()
+                        done = found_wounded
+                        min_dist = drone.process_lidar_sensor(drone.lidar())
+                        is_collision = min_dist < 10
+                        
+                        reward = drone.compute_reward(is_collision, found_wounded, 1,actions_drones[drone])
+                        
+                        if done or (step == MAX_STEPS):
+                            target = reward
+                        else:
+                            target = reward + GAMMA * value_next
+                        
+                        rewards.append(target)
+                        
+                        total_reward += reward
+
+                        
+                        if done:
+                            print("found wounded !")
+
+                else : 
+                    for drone in map_training.drones:
+                        drone.update_map_pose_speed()
+                
+                if step % UPDATE_VALUE_NET_PERIOD == 0 : 
+                    #print(f"updating value at step {step}")
+                    rewards_value = rewards[-UPDATE_VALUE_NET_PERIOD:]
+                    states_map_value = states_map[-UPDATE_VALUE_NET_PERIOD:]
+                    states_vector_value = states_vector[-UPDATE_VALUE_NET_PERIOD:]
+                    actions_vector_value = actions[-UPDATE_VALUE_NET_PERIOD:]
+                    dataset = DroneDataset(states_map_value, states_vector_value, actions_vector_value, rewards_value)
+                    data_loader = DataLoader(dataset, batch_size=BATCH_SIZE_VALUE, shuffle=True,generator = generator)
+                    for batch in data_loader:
+                        states_map_b, states_vector_b, actions_b, returns_b = batch
+                        optimize_batch(states_map_b, states_vector_b, actions_b, returns_b, policy_net, value_net, optimizer_policy, optimizer_value, device,"value")
+                            
 
         if any([drone.drone_health<=0 for drone in map_training.drones]):
             map_training = M1()
