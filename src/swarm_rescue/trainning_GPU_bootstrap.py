@@ -131,7 +131,7 @@ def optimize_batch(states_map_batch, states_vector_batch, actions_batch, returns
         policy_loss = -(log_probs * advantages).mean() 
         #print(log_probs)
         max_action_value = 1.0
-        penalty_weight = 0.1  # Reduced from 10000 to prevent overshadowing other losses
+        penalty_weight = 0.001  # Reduced from 10000 to prevent overshadowing other losses
         action_penalty = penalty_weight * torch.sum(torch.clamp(actions_batch.abs() - (max_action_value - 0.3), min=0) ** 2)
 
         # Entropy regularization
@@ -142,7 +142,7 @@ def optimize_batch(states_map_batch, states_vector_batch, actions_batch, returns
         value_loss = nn.functional.mse_loss(values, returns_batch)
 
         # L2 regularization (weight decay)
-        l2_lambda = 1e-5
+        l2_lambda = 1e-6
         l2_policy_loss = sum(torch.sum(param ** 2) for param in policy_net.parameters())
         l2_value_loss = sum(torch.sum(param ** 2) for param in value_net.parameters())
 
@@ -352,7 +352,7 @@ def train(n_frames_stack=1,n_frame_skip=1,grid_resolution = 8):
                 #print(i)
                 for drone in map_training.drones:
                     drone.timestep_count = step
-                    #drone.showMaps(display_zoomed_position_grid=True, display_zoomed_grid=True)
+                    drone.showMaps(display_zoomed_position_grid=True, display_zoomed_grid=True)
                     actions_drones = {drone: drone.process_actions([0, 0, i]) for drone in map_training.drones}
                     drone.update_map_pose_speed()
                 playground.step(actions_drones)
@@ -361,7 +361,7 @@ def train(n_frames_stack=1,n_frame_skip=1,grid_resolution = 8):
                 if step % n_frame_skip == 0:
                     for drone in map_training.drones:
                         drone.timestep_count = step
-                        #drone.showMaps(display_zoomed_position_grid=True, display_zoomed_grid=True)
+                        drone.showMaps(display_zoomed_position_grid=True, display_zoomed_grid=True)
                         
                         # Get current frame
                         current_maps = torch.from_numpy(np.stack((drone.grid.grid, drone.grid.position_grid),axis=0)).unsqueeze(0)

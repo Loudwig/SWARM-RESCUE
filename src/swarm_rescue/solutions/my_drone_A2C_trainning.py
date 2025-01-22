@@ -119,7 +119,7 @@ class MyDroneHulk(DroneAbstract):
         # Penalize collisions heavily
 
         if is_collision:
-            reward -= 50
+            reward -= 5
 
         if found_wounded:
             reward += 600
