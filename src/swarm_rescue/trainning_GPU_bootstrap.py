@@ -64,13 +64,13 @@ class DroneDataset:
         return self.states_maps[idx], self.states_vectors[idx], self.actions[idx], self.returns[idx]
 
 GAMMA = 0.99
-LEARNING_RATE = 1e-5
+LEARNING_RATE = 5e-6
 ENTROPY_BETA = 0.15
-NB_EPISODES = 1000
+NB_EPISODES = 2000
 MAX_STEPS = 64*4 # multiple du batch size c'est mieux sinon des fois on a des batchs pas de la même taille.
 BATCH_SIZE = 32 # prendre des puissance de 2
-UPDATE_VALUE_NET_PERIOD = 10
-BATCH_SIZE_VALUE = 5
+UPDATE_VALUE_NET_PERIOD = 64
+BATCH_SIZE_VALUE = 32
 
 LossValue = []
 LossPolicy = []
