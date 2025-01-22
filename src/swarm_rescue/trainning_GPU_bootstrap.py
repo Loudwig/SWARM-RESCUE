@@ -136,7 +136,7 @@ def optimize_batch(states_map_batch, states_vector_batch, actions_batch, returns
 
         # Entropy regularization
         entropy_loss = -ENTROPY_BETA * (log_stds + 0.5 * math.log(2 * math.pi * math.e)).sum(dim=1).mean()
-        total_policy_loss = policy_loss + entropy_loss + action_penalty
+        total_policy_loss = policy_loss + entropy_loss # + action_penalty
 
         # Value loss
         value_loss = nn.functional.mse_loss(values, returns_batch)
@@ -433,7 +433,6 @@ def train(n_frames_stack=1,n_frame_skip=1,grid_resolution = 8):
                         rewards.append(target)
                         
                         total_reward += reward
-
                         
                         if done:
                             print("found wounded !")
