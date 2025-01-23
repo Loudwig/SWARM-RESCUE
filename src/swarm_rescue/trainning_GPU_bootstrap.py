@@ -161,7 +161,7 @@ def optimize_batch(states_map_batch, states_vector_batch, actions_batch, returns
         # L2 regularization (weight decay)
         l2_lambda = 1e-6
         l2_policy_loss = l2_lambda* sum(torch.sum(param ** 2) for param in policy_net.parameters())
-        #l2_value_loss = l2_lambda* sum(torch.sum(param ** 2) for param in value_net.parameters())
+        l2_value_loss = l2_lambda* sum(torch.sum(param ** 2) for param in value_net.parameters())
 
         total_policy_loss = policy_loss
         value_loss = nn.functional.mse_loss(values, returns_batch) # just for printing
@@ -211,16 +211,18 @@ def optimize_batch(states_map_batch, states_vector_batch, actions_batch, returns
             values = values.unsqueeze(0)
         if returns_batch.dim() == 0:
             returns_batch = returns_batch.unsqueeze(0)
+        
         value_loss = nn.functional.mse_loss(values, returns_batch)
 
         # L2 regularization (weight decay)
-        l2_lambda = 1e-5
+        l2_lambda = 1e-6
         l2_value_loss = l2_lambda* sum(torch.sum(param ** 2) for param in value_net.parameters())
 
         # Add L2 regularization to the losses
         if WEIGHTS_LOSS_VALUE_NET :
             value_loss +=  l2_value_loss
         
+        optimizer_value.zero_grad()
         value_loss.backward()
         #torch.nn.utils.clip_grad_norm_(value_net.parameters(), max_norm=0.5)
         optimizer_value.step()
@@ -278,7 +280,7 @@ def select_action(policy_net, state_map, state_vector):
 
     log_prob = log_probs_continuous
 
-    return action.detach(), log_prob
+    return action, log_prob
 
 def train(n_frames_stack=1,n_frame_skip=1,grid_resolution = 8):
     
@@ -453,7 +455,6 @@ def train(n_frames_stack=1,n_frame_skip=1,grid_resolution = 8):
                         reward = drone.compute_reward(is_collision, found_wounded, 1,actions_drones[drone])
                         
                         if done or (step == MAX_STEPS):
-                            print("found wounded !!!")
                             target = reward
                         else:
                             target = reward + GAMMA * value_next
@@ -513,7 +514,7 @@ def train(n_frames_stack=1,n_frame_skip=1,grid_resolution = 8):
     with open(losses_csv_path, 'w', newline='') as csv_file:
         csv_writer = csv.writer(csv_file)
         # Header
-        csv_writer.writerow(["Step", "PolicyLoss", "ValueLoss", "EntropyLoss", "OutboundLoss", "WeightsPolicyLoss", "ExplorationLoss"])
+        csv_writer.writerow(["Step", "PolicyLoss", "ValueLoss", "EntropyLoss", "OutboundLoss", "WeightsPolicyLoss","WeightsValueLoss","ExplorationLoss"])
         # Rows
         for i in range(len(LossPolicy)):
             csv_writer.writerow([
@@ -523,6 +524,7 @@ def train(n_frames_stack=1,n_frame_skip=1,grid_resolution = 8):
                 LossEntropy[i],
                 LossOutbound[i],
                 LossWeightsPolicy[i],
+                LossWeightsValue[i],
                 LossExploration[i],
             ])
 
