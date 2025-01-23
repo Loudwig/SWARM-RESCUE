@@ -57,15 +57,37 @@ class DroneDataset:
     def __getitem__(self, idx):
         return self.states_maps[idx], self.states_vectors[idx], self.actions[idx], self.returns[idx]
 
-GAMMA = 0.99
-LEARNING_RATE = 1e-5
+GAMMA = 0.99 # how much future reward are taken into account
+LEARNING_RATE_POLICY = 1e-5 
+LEARNING_RATE_VALUE = 1e-5
 ENTROPY_BETA = 0.05
-NB_EPISODES = 200
-MAX_STEPS = 64*4 + 70 # multiple du batch size c'est mieux sinon des fois on a des batchs pas de la même taille.
+NB_EPISODES = 100
+MAX_STEPS = 64*4 + 69 # multiple du batch size c'est mieux sinon des fois on a des batchs pas de la même taille.
 BATCH_SIZE = 32 # prendre des puissance de 2
 UPDATE_VALUE_NET_PERIOD = 16  # periode d'update du value netork pendant un episode (le policy network lui ne s'update que à la fin de l'épisode)
 BATCH_SIZE_VALUE = 8 # batch size pour l'update du value network
+OUTBOUND_LOSS = True
+ENTROPY_LOSS = True
+WEIGHTS_LOSS_VALUE_NET = True
+WEIGHTS_LOSS_POLICY_NET = True
 
+PARAMS = {
+    "learning_rate_policy" : LEARNING_RATE_POLICY,
+    "learning_rate_value" : LEARNING_RATE_VALUE,
+    "entropy_beta" : ENTROPY_BETA,
+    "nb_episodes" : NB_EPISODES,
+    "max_steps" : MAX_STEPS,
+    "batch_size" : BATCH_SIZE,
+    "update_value_net_period" : UPDATE_VALUE_NET_PERIOD,
+    "batch_size_value" : BATCH_SIZE_VALUE,
+    "outbound_loss" : OUTBOUND_LOSS,
+    "entropy_loss" : ENTROPY_LOSS,
+    "weights_loss_value_net" : WEIGHTS_LOSS_VALUE_NET,
+    "weights_loss_policy_net" : WEIGHTS_LOSS_POLICY_NET,
+
+} 
+
+# Losses
 LossValue = []
 LossPolicy = []
 LossEntropy = []
@@ -124,38 +146,44 @@ def optimize_batch(states_map_batch, states_vector_batch, actions_batch, returns
 
         # Policy loss with proper scaling
         policy_loss = -(log_probs * advantages).mean() 
-        #print(log_probs)
-        max_action_value = 1.0
-        penalty_weight = 0.001  # Reduced from 10000 to prevent overshadowing other losses
-        # PENELASIZE IF ACTION ARE TO CLOSE TO ONE or -ONE
-        
-        action_penalty = penalty_weight * torch.sum(torch.clamp(actions_batch.abs() - (max_action_value - 0.3), min=0) ** 2)
 
+        penalty_weight = 1  # 
+        # PENELASIZE IF MEANS ARE OUTSIDE OF -1 ;1 
+        outbound_loss = penalty_weight* torch.mean((torch.relu(torch.abs(means) - 1)))
+    
         # Entropy regularization
         entropy_loss = -ENTROPY_BETA * (log_stds + 0.5 * math.log(2 * math.pi * math.e)).sum(dim=1).mean()
-        total_policy_loss = policy_loss + entropy_loss  + action_penalty
-
+        
         # Value loss
-        value_loss = nn.functional.mse_loss(values, returns_batch)
 
         # L2 regularization (weight decay)
         l2_lambda = 1e-6
-        l2_policy_loss = sum(torch.sum(param ** 2) for param in policy_net.parameters())
-        l2_value_loss = sum(torch.sum(param ** 2) for param in value_net.parameters())
+        l2_policy_loss = l2_lambda* sum(torch.sum(param ** 2) for param in policy_net.parameters())
+        l2_value_loss = l2_lambda* sum(torch.sum(param ** 2) for param in value_net.parameters())
 
-        # # Add L2 regularization to the losses
-        # total_policy_loss += l2_lambda * l2_policy_loss
-        # value_loss += l2_lambda * l2_value_loss
+        total_policy_loss = policy_loss
+        value_loss = nn.functional.mse_loss(values, returns_batch)
+
+
+        if OUTBOUND_LOSS:
+            total_policy_loss += outbound_loss
+        if ENTROPY_LOSS:
+            total_policy_loss += entropy_loss
+        if WEIGHTS_LOSS_POLICY_NET: 
+            total_policy_loss += l2_policy_loss
+        if WEIGHTS_LOSS_VALUE_NET:
+            value_loss += l2_value_loss
+
 
         LossPolicy.append(total_policy_loss.item())
         LossValue.append(value_loss.item())
         LossEntropy.append(entropy_loss.item())
-        LossOutbound.append(action_penalty.item())
-        LossWeightsPolicy.append(l2_lambda* l2_policy_loss.item())
+        LossOutbound.append(outbound_loss.item())
+        LossWeightsPolicy.append(l2_policy_loss.item())
         LossExploration.append(policy_loss.item())
-        LossWeightsValue.append(l2_lambda* l2_value_loss.item())
+        LossWeightsValue.append(l2_value_loss.item())
 
-        # Backpropagation
+        # BACKPROP POLICY NET
         optimizer_policy.zero_grad()
         total_policy_loss.backward()
         # total_norm = 0.0
@@ -168,6 +196,7 @@ def optimize_batch(states_map_batch, states_vector_batch, actions_batch, returns
         #torch.nn.utils.clip_grad_norm_(policy_net.parameters(), max_norm=0.5)
         optimizer_policy.step()
 
+        # BACKPROP VALUE NET
         optimizer_value.zero_grad()
         value_loss.backward()
         #torch.nn.utils.clip_grad_norm_(value_net.parameters(), max_norm=0.5)
@@ -255,21 +284,17 @@ def train(n_frames_stack=1,n_frame_skip=1,grid_resolution = 8):
 
     # Create a unique folder name based on hyperparameters and timestamp
     current_time = time.strftime("%Y%m%d-%H%M%S")
-    folder_name = f"solutions/trained_models/run_lr_{LEARNING_RATE}_episodes_{NB_EPISODES}_{current_time}"
+    folder_name = f"solutions/trained_models/run_{current_time}"
     os.makedirs(folder_name, exist_ok=True)
 
     # Save hyperparameters to a text file
     hyperparams_path = os.path.join(folder_name, "hyperparams.txt")
     with open(hyperparams_path, 'w') as f:
-        f.write(f"LEARNING_RATE = {LEARNING_RATE}\n")
-        f.write(f"ENTROPY_BETA = {ENTROPY_BETA}\n")
-        f.write(f"NB_EPISODES = {NB_EPISODES}\n")
-        f.write(f"MAX_STEPS = {MAX_STEPS}\n")
-        f.write(f"BATCH_SIZE = {BATCH_SIZE}\n")
-        f.write(f"frame_stacking = {n_frames_stack}\n")
-        f.write(f"frame_skipping = {n_frame_skip}\n")
-        f.write(f"grid_resolution = {grid_resolution}\n")
-        f.write(f"Other hyperparams...\n")
+        # Write hyperparameters from the PARAMS DICT : 
+        for key, value in PARAMS.items():
+            f.write(f"{key}: {value}\n")
+
+        
 
     map_training = M1()
     playground = map_training.construct_playground(drone_type=MyDroneHulk)
@@ -282,8 +307,8 @@ def train(n_frames_stack=1,n_frame_skip=1,grid_resolution = 8):
     policy_net = NetworkPolicy(h=h_dummy,w=w_dummy,frame_stack=n_frames_stack).to(device)
     value_net = NetworkValue(h=h_dummy,w=w_dummy).to(device)
 
-    optimizer_policy = optim.Adam(policy_net.parameters(), lr=LEARNING_RATE)
-    optimizer_value = optim.Adam(value_net.parameters(), lr=LEARNING_RATE)
+    optimizer_policy = optim.Adam(policy_net.parameters(), lr=LEARNING_RATE_POLICY)
+    optimizer_value = optim.Adam(value_net.parameters(), lr=LEARNING_RATE_VALUE)
     policy_net.apply(lambda m: m.reset_parameters() if hasattr(m, 'reset_parameters') else None)
     value_net.apply(lambda m: m.reset_parameters() if hasattr(m, 'reset_parameters') else None)
 
@@ -349,7 +374,7 @@ def train(n_frames_stack=1,n_frame_skip=1,grid_resolution = 8):
                 #print(i)
                 for drone in map_training.drones:
                     drone.timestep_count = step
-                    #drone.showMaps(display_zoomed_position_grid=True, display_zoomed_grid=True)
+                    drone.showMaps(display_zoomed_position_grid=True, display_zoomed_grid=True)
                     actions_drones = {drone: drone.process_actions([0, 0, i]) for drone in map_training.drones}
                     drone.update_map_pose_speed()
                 playground.step(actions_drones)
@@ -358,7 +383,7 @@ def train(n_frames_stack=1,n_frame_skip=1,grid_resolution = 8):
                 if step % n_frame_skip == 0:
                     for drone in map_training.drones:
                         drone.timestep_count = step
-                        #drone.showMaps(display_zoomed_position_grid=True, display_zoomed_grid=True)
+                        drone.showMaps(display_zoomed_position_grid=True, display_zoomed_grid=True)
                         
                         # Get current frame
                         current_maps = torch.from_numpy(np.stack((drone.grid.grid, drone.grid.position_grid),axis=0)).unsqueeze(0)
