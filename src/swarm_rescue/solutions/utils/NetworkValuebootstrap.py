@@ -10,11 +10,14 @@ class NetworkValue(nn.Module):
         self.input_channels = map_channels 
         
         self.cnn = nn.Sequential(
-            nn.Conv2d(self.input_channels, 16, kernel_size=3, stride=2, padding=1),
+            nn.Conv2d(self.input_channels, 16, kernel_size=3, stride=1, padding=1),
+            nn.MaxPool2d(2,stride=2),
             nn.ReLU(),
-            nn.Conv2d(16, 32, kernel_size=3, stride=2, padding=1),
+            nn.Conv2d(16, 32, kernel_size=3, stride=1, padding=1),
+            nn.MaxPool2d(2,stride=2),
             nn.ReLU(),
-            nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1),
+            nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1),
+            nn.MaxPool2d(2,stride=2),
             nn.ReLU()
         )
 
