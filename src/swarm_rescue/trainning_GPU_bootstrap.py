@@ -280,7 +280,7 @@ def select_action(policy_net, state_map, state_vector):
 
     log_prob = log_probs_continuous
 
-    return action, log_prob
+    return action.detach(), log_prob
 
 def train(n_frames_stack=1,n_frame_skip=1,grid_resolution = 8):
     
