@@ -146,6 +146,7 @@ def optimize_batch(states_map_batch, states_vector_batch, actions_batch, returns
         if advantages.numel() > 1:
             advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
+        print(f"advantages : {advantages}")
         # Policy loss with proper scaling
         policy_loss = -(log_probs * advantages).mean() 
 
@@ -195,6 +196,7 @@ def optimize_batch(states_map_batch, states_vector_batch, actions_batch, returns
         # total_norm = total_norm**0.5
         #print(f"[DEBUG] Norme L2 du gradient Policy = {total_norm:.4f}")
         #torch.nn.utils.clip_grad_norm_(policy_net.parameters(), max_norm=0.5)
+        
         optimizer_policy.step()
 
         # BACKPROP VALUE NET

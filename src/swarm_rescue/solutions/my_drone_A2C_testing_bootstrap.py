@@ -30,7 +30,7 @@ from solutions.utils.NetworkValuebootstrap import NetworkValue
 import os
 
 
-PATH_TRAINED_MODEL = "solutions/trained_models/run_lr_1e-05_episodes_1000_20250121-144507"
+PATH_TRAINED_MODEL = "solutions/trained_models/run_20250124-001842"
 
 class MyDroneHulk(DroneAbstract):
     class State(Enum):
@@ -45,8 +45,8 @@ class MyDroneHulk(DroneAbstract):
         
         # Default hyperparameters : 
         self.resolution = 8
-        self.frame_skipping = 4
-        self.frame_stack = 2
+        self.frame_skipping = 1
+        self.frame_stack = 1
 
         # load the params of the trainning from the hyperparameters.txt file : 
         # Search resolution, frame_skipping, frame_stack in the hyperparameters.txt file
