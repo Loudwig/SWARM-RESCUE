@@ -146,7 +146,7 @@ def optimize_batch(states_map_batch, states_vector_batch, actions_batch, returns
         if advantages.numel() > 1:
             advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
-        print(f"advantages : {advantages}")
+        #print(f"advantages : {advantages}")
         # Policy loss with proper scaling
         policy_loss = -(log_probs * advantages).mean() 
 
@@ -286,6 +286,9 @@ def select_action(policy_net, state_map, state_vector):
 
 def train(n_frames_stack=1,n_frame_skip=1,grid_resolution = 8):
     
+    PARAMS["n_frames_stack"] = n_frames_stack
+    PARAMS["n_frame_skip"] = n_frame_skip
+    PARAMS["grid_resolution"] = grid_resolution
     print("Training bootstrap")
     print("Using device:", device)
 
