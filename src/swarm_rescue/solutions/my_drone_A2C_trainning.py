@@ -115,16 +115,19 @@ class MyDroneHulk(DroneAbstract):
         rotation = action["rotation"]
 
         reward = 0
+        reward += self.grid.exploration_score
+
+        if reward <= 0 : 
+            reward -= 10
 
         # Penalize collisions heavily
 
         if is_collision:
-            reward -= 5
+            reward -= 10
 
         if found_wounded:
-            reward += 600
+            reward += 200
         
-        reward += self.grid.exploration_score
 
         # Penalize idling or lack of movement
         reward -= time_penalty
