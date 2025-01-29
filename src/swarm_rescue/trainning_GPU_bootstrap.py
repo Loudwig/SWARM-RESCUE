@@ -327,7 +327,7 @@ def train(n_frames_stack=1,n_frame_skip=1,grid_resolution = 8):
     global_state_buffer = { drone : deque(maxlen= n_frames_stack) for drone in map_training.drones}
     rewards_per_episode = []
     done = False
-
+    map_channels = 1
     for episode in range(NB_EPISODES):
         playground.reset()
         
@@ -343,7 +343,8 @@ def train(n_frames_stack=1,n_frame_skip=1,grid_resolution = 8):
                 frame_buffers[drone] = deque(maxlen=n_frames_stack)
             
             # Initialize with dummy frames
-            dummy_maps = torch.zeros((1, 2,map_training.drones[0].grid.grid.shape[0], map_training.drones[0].grid.grid.shape[1]), device=device)
+
+            dummy_maps = torch.zeros((1, map_channels,map_training.drones[0].grid.grid.shape[0], map_training.drones[0].grid.grid.shape[1]), device=device)
             for _ in range(n_frames_stack):
                 frame_buffers[drone].append(dummy_maps)
 
@@ -397,9 +398,10 @@ def train(n_frames_stack=1,n_frame_skip=1,grid_resolution = 8):
                         #drone.showMaps(display_zoomed_position_grid=True, display_zoomed_grid=True)
                         
                         # Get current frame
-                        current_maps = torch.from_numpy(np.stack((drone.grid.grid, drone.grid.position_grid),axis=0)).unsqueeze(0)
+                        #current_maps = torch.from_numpy(np.stack((drone.grid.grid, drone.grid.position_grid),axis=0)).unsqueeze(0)
+                        current_maps = torch.from_numpy(drone.grid.grid).unsqueeze(0).unsqueeze(0)
                         current_maps = current_maps.float().to(device)
-                        #print(f"shape of the maps : {maps.shape}")
+                        #print(f"shape of the maps : {current_maps.shape}")
 
                         current_global_state = drone.process_state_before_network(drone.estimated_pose.position[0],
                             drone.estimated_pose.position[1],
@@ -438,7 +440,8 @@ def train(n_frames_stack=1,n_frame_skip=1,grid_resolution = 8):
                         drone.update_map_pose_speed() # conséquence de l'action
 
                         # calculate new state s'
-                        next_maps = torch.from_numpy(np.stack((drone.grid.grid, drone.grid.position_grid),axis=0)).unsqueeze(0)
+                        #next_maps = torch.from_numpy(np.stack((drone.grid.grid, drone.grid.position_grid),axis=0)).unsqueeze(0)
+                        next_maps = torch.from_numpy(drone.grid.grid).unsqueeze(0).unsqueeze(0)
                         next_maps = next_maps.float().to(device)
                         next_global_state = drone.process_state_before_network(drone.estimated_pose.position[0],
                             drone.estimated_pose.position[1],

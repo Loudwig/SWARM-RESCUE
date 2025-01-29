@@ -1,6 +1,7 @@
 from enum import Enum
 from collections import deque
 import math
+import random
 from typing import Optional
 import cv2
 import numpy as np
@@ -29,8 +30,7 @@ from solutions.utils.NetworkPolicy import NetworkPolicy
 from solutions.utils.NetworkValuebootstrap import NetworkValue
 import os
 
-
-PATH_TRAINED_MODEL = "solutions/trained_models/run_20250124-133701"
+PATH_TRAINED_MODEL = "solutions/trained_models/run_20250129-160818"
 
 class MyDroneHulk(DroneAbstract):
     class State(Enum):
@@ -56,15 +56,15 @@ class MyDroneHulk(DroneAbstract):
                 lines = f.readlines()
                 for line in lines:
                     if "grid_resolution" in line:
-                        self.resolution = int(line.split("=")[1])
+                        self.resolution = int(line.split(":")[1])
                         print(f"Resolution found in hyperparameters: {self.resolution}")
                     
-                    if "frame_skipping" in line:
-                        self.frame_skipping = int(line.split("=")[1])
+                    elif "n_frame_skip" in line:
+                        self.frame_skipping = int(line.split(":")[1])
                         print(f"Frame skipping found in hyperparameters: {self.frame_skipping}")
                     
-                    if "frame_stacking" in line:
-                        self.frame_stack = int(line.split("=")[1])
+                    elif "n_frames_stack" in line:
+                        self.frame_stack = int(line.split(":")[1])
                         print(f"Frame stack found in hyperparameters: {self.frame_stack}")
                    
 
@@ -145,34 +145,40 @@ class MyDroneHulk(DroneAbstract):
         self.timestep_count +=1 
         self.update_map_pose_speed()
         self.showMaps(display_zoomed_position_grid = True,display_zoomed_grid = True)
-
-        if self.timestep_count % self.frame_skipping == 0:
-            #print( f"EXPLORATION SCORE : {self.grid.exploration_score}")
-            maps = torch.from_numpy(np.stack((self.grid.grid, self.grid.position_grid),axis=0)).unsqueeze(0)
-            maps = maps.float()            
-            global_state = torch.tensor([self.estimated_pose.position[0], self.estimated_pose.position[1], self.estimated_pose.orientation, self.estimated_pose.vitesse_X, self.estimated_pose.vitesse_Y, self.estimated_pose.vitesse_angulaire], dtype=torch.float32, device=device).unsqueeze(0)
-            self.frame_buffer.append(maps)
-            self.state_buffer.append(global_state)
-            stacked_frames = torch.cat(list(self.frame_buffer), dim=1)
-            stacked_states = torch.cat(list(self.state_buffer), dim=1)
-            #print(f" shape de global state stacked{stacked_states.shape}")
-            action,_ = self.select_action(stacked_frames,stacked_states)
-            command = self.process_actions(action)
-            self.previous_command = command
+        if self.timestep_count < 70:
+                if self.timestep_count < 50 : 
+                    i = random.random() # faire tourner le drone pour que le lidar prêne tout
+                else : 
+                    i = 0
+                return {"forward": 0, "lateral": 0, "rotation": i, "grasper": 0}
         else : 
-            command = self.previous_command
-        
-        found_wounded = self.process_semantic_sensor()
-        min_dist = self.process_lidar_sensor(self.lidar())
-        is_collision = min_dist < 10
-        reward = self.compute_reward(is_collision, found_wounded, 1,command)
-        # nulle commande 
-        #command = {"forward": 0, "lateral": 0, "rotation": 0, "grasper": 0}
-        print(f"time step : {self.timestep_count}")
-        print(f"Reward : {reward}")   
-        if self.timestep_count >= 300 : 
-            print("End of trainning")
-        return command
+            if self.timestep_count % self.frame_skipping == 0:
+                #print( f"EXPLORATION SCORE : {self.grid.exploration_score}")
+                maps = torch.from_numpy(np.stack((self.grid.grid, self.grid.position_grid),axis=0)).unsqueeze(0)
+                maps = maps.float()            
+                global_state = torch.tensor([self.estimated_pose.position[0], self.estimated_pose.position[1], self.estimated_pose.orientation, self.estimated_pose.vitesse_X, self.estimated_pose.vitesse_Y, self.estimated_pose.vitesse_angulaire], dtype=torch.float32, device=device).unsqueeze(0)
+                self.frame_buffer.append(maps)
+                self.state_buffer.append(global_state)
+                stacked_frames = torch.cat(list(self.frame_buffer), dim=1)
+                stacked_states = torch.cat(list(self.state_buffer), dim=1)
+                #print(f" shape de global state stacked{stacked_states.shape}")
+                action,_ = self.select_action(stacked_frames,stacked_states)
+                command = self.process_actions(action)
+                self.previous_command = command
+            else : 
+                command = self.previous_command
+            
+            found_wounded = self.process_semantic_sensor()
+            min_dist = self.process_lidar_sensor(self.lidar())
+            is_collision = min_dist < 10
+            reward = self.compute_reward(is_collision, found_wounded, 1,command)
+            # nulle commande 
+            #command = {"forward": 0, "lateral": 0, "rotation": 0, "grasper": 0}
+            print(f"time step : {self.timestep_count}")
+            print(f"Reward : {reward}")   
+            if self.timestep_count >= 300 : 
+                print("End of trainning")
+            return command
 
     def process_semantic_sensor(self):
         semantic_values = self.semantic_values()
