@@ -59,10 +59,10 @@ class DroneDataset:
 
 GAMMA = 0.99 # how much future reward are taken into account
 LEARNING_RATE_POLICY = 1e-5 
-LEARNING_RATE_VALUE = 1e-5
+LEARNING_RATE_VALUE = 1e-4
 ENTROPY_BETA = 5e-5
-NB_EPISODES = 2000
-MAX_STEPS = 64*4 + 69 # multiple du batch size c'est mieux sinon des fois on a des batchs pas de la même taille.
+NB_EPISODES = 500
+MAX_STEPS = 64*2 + 69 # multiple du batch size c'est mieux sinon des fois on a des batchs pas de la même taille.
 BATCH_SIZE = 32 # prendre des puissance de 2
 UPDATE_VALUE_NET_PERIOD = 16  # periode d'update du value netork pendant un episode (le policy network lui ne s'update que à la fin de l'épisode)
 BATCH_SIZE_VALUE = 8 # batch size pour l'update du value network
@@ -384,7 +384,7 @@ def train(n_frames_stack=1,n_frame_skip=1,grid_resolution = 8):
                     i = 0
                 for drone in map_training.drones:
                     drone.timestep_count = step
-                    #drone.showMaps(display_zoomed_position_grid=True, display_zoomed_grid=True)
+                    drone.showMaps(display_zoomed_position_grid=True, display_zoomed_grid=True)
                     actions_drones = {drone: drone.process_actions([0, 0, i]) for drone in map_training.drones}
                     drone.update_map_pose_speed()
                 playground.step(actions_drones)
@@ -394,7 +394,7 @@ def train(n_frames_stack=1,n_frame_skip=1,grid_resolution = 8):
                 if step % n_frame_skip == 0: # frame skipping
                     for drone in map_training.drones:
                         drone.timestep_count = step
-                        #drone.showMaps(display_zoomed_position_grid=True, display_zoomed_grid=True)
+                        drone.showMaps(display_zoomed_position_grid=True, display_zoomed_grid=True)
                         
                         # Get current frame
                         current_maps = torch.from_numpy(np.stack((drone.grid.grid, drone.grid.position_grid),axis=0)).unsqueeze(0)

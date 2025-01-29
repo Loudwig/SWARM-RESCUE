@@ -118,7 +118,7 @@ class MyDroneHulk(DroneAbstract):
         reward += self.grid.exploration_score
 
         if reward <= 0 : 
-            reward -= 10
+            reward -= 5
 
         # Penalize collisions heavily
 

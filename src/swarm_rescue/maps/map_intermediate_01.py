@@ -60,11 +60,11 @@ class MyMapIntermediate01(MapAbstract):
     def construct_playground(self, drone_type: Type[DroneAbstract]) -> Playground:
         playground = ClosedPlayground(size=self._size_area)
 
-        playground.add(self._return_area, self._return_area_pos)
-        playground.add(self._rescue_center, self._rescue_center_pos)
+        #playground.add(self._return_area, self._return_area_pos)
+        #playground.add(self._rescue_center, self._rescue_center_pos)
 
-        add_walls(playground)
-        add_boxes(playground)
+        #add_walls(playground)
+        #add_boxes(playground)
 
         self._explored_map.initialize_walls(playground)
 
