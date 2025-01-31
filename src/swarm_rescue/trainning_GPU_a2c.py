@@ -38,6 +38,22 @@ device = torch.device('cuda:2' if torch.cuda.is_available() else 'cpu')
 torch.set_default_device(device)
 generator = torch.Generator(device=device)
 
+GAMMA = 0.99 # how much future reward are taken into account
+LEARNING_RATE_POLICY = 1e-5 
+LEARNING_RATE_VALUE = 1e-4
+ENTROPY_BETA = 5e-5
+NB_EPISODES = 500
+MAX_STEPS = 64*2 + 69 # multiple du batch size c'est mieux sinon des fois on a des batchs pas de la même taille.
+BATCH_SIZE = 32 # prendre des puissance de 2
+UPDATE_VALUE_NET_PERIOD = 16  # periode d'update du value netork pendant un episode (le policy network lui ne s'update que à la fin de l'épisode)
+BATCH_SIZE_VALUE = 8 # batch size pour l'update du value network
+OUTBOUND_LOSS = True
+ENTROPY_LOSS = True
+WEIGHTS_LOSS_VALUE_NET = True
+WEIGHTS_LOSS_POLICY_NET = True
+CLIP_GRADIENTS_POLICY = True
+CLIP_GRADIENTS_VALUE = True
+
 class DroneDataset:
     def __init__(self, states_maps, states_vectors, actions, returns):
         # Ensure all elements in states_maps are tensors on the correct device
@@ -56,22 +72,6 @@ class DroneDataset:
 
     def __getitem__(self, idx):
         return self.states_maps[idx], self.states_vectors[idx], self.actions[idx], self.returns[idx]
-
-GAMMA = 0.99 # how much future reward are taken into account
-LEARNING_RATE_POLICY = 1e-5 
-LEARNING_RATE_VALUE = 1e-4
-ENTROPY_BETA = 5e-5
-NB_EPISODES = 500
-MAX_STEPS = 64*2 + 69 # multiple du batch size c'est mieux sinon des fois on a des batchs pas de la même taille.
-BATCH_SIZE = 32 # prendre des puissance de 2
-UPDATE_VALUE_NET_PERIOD = 16  # periode d'update du value netork pendant un episode (le policy network lui ne s'update que à la fin de l'épisode)
-BATCH_SIZE_VALUE = 8 # batch size pour l'update du value network
-OUTBOUND_LOSS = True
-ENTROPY_LOSS = True
-WEIGHTS_LOSS_VALUE_NET = True
-WEIGHTS_LOSS_POLICY_NET = True
-
-
 
 PARAMS = {
     "learning_rate_policy" : LEARNING_RATE_POLICY,
@@ -195,8 +195,8 @@ def optimize_batch(states_map_batch, states_vector_batch, actions_batch, returns
         #         total_norm += param_norm.item()**2
         # total_norm = total_norm**0.5
         #print(f"[DEBUG] Norme L2 du gradient Policy = {total_norm:.4f}")
-        #torch.nn.utils.clip_grad_norm_(policy_net.parameters(), max_norm=0.5)
-        
+        if CLIP_GRADIENTS_POLICY:
+            torch.nn.utils.clip_grad_norm_(policy_net.parameters(), max_norm=0.5)
         optimizer_policy.step()
 
         # BACKPROP VALUE NET
@@ -226,7 +226,8 @@ def optimize_batch(states_map_batch, states_vector_batch, actions_batch, returns
         
         optimizer_value.zero_grad()
         value_loss.backward()
-        #torch.nn.utils.clip_grad_norm_(value_net.parameters(), max_norm=0.5)
+        if CLIP_GRADIENTS_VALUE:
+            torch.nn.utils.clip_grad_norm_(value_net.parameters(), max_norm=0.5)
         optimizer_value.step()
     
     else : 
