@@ -30,7 +30,7 @@ from solutions.utils.NetworkPolicy import NetworkPolicy
 from solutions.utils.NetworkValuebootstrap import NetworkValue
 import os
 
-PATH_TRAINED_MODEL = "solutions/trained_models/run_20250129-160818"
+PATH_TRAINED_MODEL = "solutions/trained_models/run_20250129-183839"
 
 class MyDroneHulk(DroneAbstract):
     class State(Enum):
@@ -89,7 +89,7 @@ class MyDroneHulk(DroneAbstract):
 
         
         for _ in range(self.frame_stack):
-            self.frame_buffer.append(torch.zeros((1,2,self.grid.grid.shape[0], self.grid.grid.shape[1]), dtype=torch.float32, device=device))
+            self.frame_buffer.append(torch.zeros((1,1,self.grid.grid.shape[0], self.grid.grid.shape[1]), dtype=torch.float32, device=device))
             self.state_buffer.append(torch.zeros((1,6), dtype=torch.float32, device=device))
         
         # Par défaut on load un model. Si on veut l'entrainer il faut redefinir policy net et value net        
@@ -154,7 +154,7 @@ class MyDroneHulk(DroneAbstract):
         else : 
             if self.timestep_count % self.frame_skipping == 0:
                 #print( f"EXPLORATION SCORE : {self.grid.exploration_score}")
-                maps = torch.from_numpy(np.stack((self.grid.grid, self.grid.position_grid),axis=0)).unsqueeze(0)
+                maps = torch.from_numpy(self.grid.grid).unsqueeze(0).unsqueeze(0)
                 maps = maps.float()            
                 global_state = torch.tensor([self.estimated_pose.position[0], self.estimated_pose.position[1], self.estimated_pose.orientation, self.estimated_pose.vitesse_X, self.estimated_pose.vitesse_Y, self.estimated_pose.vitesse_angulaire], dtype=torch.float32, device=device).unsqueeze(0)
                 self.frame_buffer.append(maps)
