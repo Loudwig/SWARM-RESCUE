@@ -284,8 +284,8 @@ def select_action(policy_net, state_map, state_vector):
 
     return action.detach(), log_prob
 
-def train(n_frames_stack=1,n_frame_skip=1,grid_resolution = 8):
-    
+def train(n_frames_stack=1,n_frame_skip=1,grid_resolution = 8,map_channels = 2):
+    PARAMS["map_channels"] = map_channels
     PARAMS["n_frames_stack"] = n_frames_stack
     PARAMS["n_frame_skip"] = n_frame_skip
     PARAMS["grid_resolution"] = grid_resolution
@@ -327,7 +327,6 @@ def train(n_frames_stack=1,n_frame_skip=1,grid_resolution = 8):
     global_state_buffer = { drone : deque(maxlen= n_frames_stack) for drone in map_training.drones}
     rewards_per_episode = []
     done = False
-    map_channels = 1
     for episode in range(NB_EPISODES):
         playground.reset()
         
@@ -398,8 +397,16 @@ def train(n_frames_stack=1,n_frame_skip=1,grid_resolution = 8):
                         #drone.showMaps(display_zoomed_position_grid=True, display_zoomed_grid=True)
                         
                         # Get current frame
-                        #current_maps = torch.from_numpy(np.stack((drone.grid.grid, drone.grid.position_grid),axis=0)).unsqueeze(0)
-                        current_maps = torch.from_numpy(drone.grid.grid).unsqueeze(0).unsqueeze(0)
+
+                        # 2 map channels : grid + position grid
+                        if map_channels ==2 : 
+                            current_maps = torch.from_numpy(np.stack((drone.grid.grid, drone.grid.position_grid),axis=0)).unsqueeze(0)
+                        # 1 map channel : grid
+                        elif map_channels == 1 :
+                            current_maps = torch.from_numpy(drone.grid.grid).unsqueeze(0).unsqueeze(0)
+                        else : 
+                            raise ValueError("map_channels must be 1 or 2")
+                        
                         current_maps = current_maps.float().to(device)
                         #print(f"shape of the maps : {current_maps.shape}")
 
@@ -440,8 +447,11 @@ def train(n_frames_stack=1,n_frame_skip=1,grid_resolution = 8):
                         drone.update_map_pose_speed() # conséquence de l'action
 
                         # calculate new state s'
-                        #next_maps = torch.from_numpy(np.stack((drone.grid.grid, drone.grid.position_grid),axis=0)).unsqueeze(0)
-                        next_maps = torch.from_numpy(drone.grid.grid).unsqueeze(0).unsqueeze(0)
+                        # 2 map channels : grid + position grid
+                        if map_channels ==2 :
+                            next_maps = torch.from_numpy(np.stack((drone.grid.grid, drone.grid.position_grid),axis=0)).unsqueeze(0)
+                        elif map_channels == 1 :
+                            next_maps = torch.from_numpy(drone.grid.grid).unsqueeze(0).unsqueeze(0)
                         next_maps = next_maps.float().to(device)
                         next_global_state = drone.process_state_before_network(drone.estimated_pose.position[0],
                             drone.estimated_pose.position[1],
