@@ -12,13 +12,13 @@ class NetworkPolicy(nn.Module):
         self.cnn = nn.Sequential(
             nn.Conv2d(self.input_channels, 16, kernel_size=3, stride=1, padding=1),
             nn.MaxPool2d(2,stride=2),
-            nn.Tanh(),
+            nn.ReLU(),
             nn.Conv2d(16, 32, kernel_size=3, stride=1, padding=1),
             nn.MaxPool2d(2,stride=2),
-            nn.Tanh(),
+            nn.ReLU(),
             nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1),
             nn.MaxPool2d(2,stride=2),
-            nn.Tanh()
+            nn.ReLU()
         )
 
         # calculate the output size of the CNN
@@ -36,7 +36,7 @@ class NetworkPolicy(nn.Module):
         
         self.mlp = nn.Sequential(
             nn.Linear(mlp_input_dim, hidden_size),
-            nn.Tanh(),
+            nn.ReLU(),
         )
         self.mu_head = nn.Linear(hidden_size, num_actions)
         self.log_sigma_head = nn.Linear(hidden_size, num_actions)
@@ -47,7 +47,7 @@ class NetworkPolicy(nn.Module):
         # print(f"x shape aften cnn: {x.shape}")
         x = x.view(x.size(0), -1)
         # print(f"x shape after view: {x.shape}")
-        x = F.tanh(self.fc_cnn(x))
+        x = F.relu(self.fc_cnn(x))
         # print(f"x shape after fc_cnn: {x.shape}")
         # print(f"global_state shape: {global_state.shape}")
         x = torch.cat((x, global_state), dim=1) # On trans
