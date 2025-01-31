@@ -285,6 +285,7 @@ def select_action(policy_net, state_map, state_vector):
     return action.detach(), log_prob
 
 def train(n_frames_stack=1,n_frame_skip=1,grid_resolution = 8,map_channels = 2):
+    
     PARAMS["map_channels"] = map_channels
     PARAMS["n_frames_stack"] = n_frames_stack
     PARAMS["n_frame_skip"] = n_frame_skip
@@ -314,8 +315,8 @@ def train(n_frames_stack=1,n_frame_skip=1,grid_resolution = 8,map_channels = 2):
     w_dummy  = int(map_training.drones[0].grid.size_area_world[1] / grid_resolution
                                    + 0.5)
 
-    policy_net = NetworkPolicy(h=h_dummy,w=w_dummy,frame_stack=n_frames_stack).to(device)
-    value_net = NetworkValue(h=h_dummy,w=w_dummy).to(device)
+    policy_net = NetworkPolicy(h=h_dummy,w=w_dummy,frame_stack=n_frames_stack,map_channels=map_channels).to(device)
+    value_net = NetworkValue(h=h_dummy,w=w_dummy,map_channels=map_channels).to(device)
 
     optimizer_policy = optim.Adam(policy_net.parameters(), lr=LEARNING_RATE_POLICY)
     optimizer_value = optim.Adam(value_net.parameters(), lr=LEARNING_RATE_VALUE)
