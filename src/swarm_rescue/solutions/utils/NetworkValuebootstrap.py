@@ -12,13 +12,13 @@ class NetworkValue(nn.Module):
         self.cnn = nn.Sequential(
             nn.Conv2d(self.input_channels, 16, kernel_size=3, stride=1, padding=1),
             nn.MaxPool2d(2,stride=2),
-            nn.ReLU(),
+            nn.Tanh(),
             nn.Conv2d(16, 32, kernel_size=3, stride=1, padding=1),
             nn.MaxPool2d(2,stride=2),
-            nn.ReLU(),
+            nn.Tanh(),
             nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1),
             nn.MaxPool2d(2,stride=2),
-            nn.ReLU()
+            nn.Tanh()
         )
 
         # calculate the output size of the CNN
@@ -35,7 +35,7 @@ class NetworkValue(nn.Module):
         
         self.mlp = nn.Sequential(
             nn.Linear(mlp_input_dim, hidden_size),
-            nn.ReLU(),
+            nn.Tanh(),
             nn.Linear(hidden_size, 1)
         )
         
@@ -43,7 +43,7 @@ class NetworkValue(nn.Module):
     def forward(self, map, global_state):
         x = self.cnn(map)
         x = x.view(x.size(0), -1)
-        x = F.relu(self.fc_cnn(x))
+        x = F.tanh(self.fc_cnn(x))
         x = torch.cat((x, global_state), dim=1)
         x = self.mlp(x) 
         return x
