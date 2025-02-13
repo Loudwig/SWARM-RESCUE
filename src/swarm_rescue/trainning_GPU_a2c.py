@@ -39,14 +39,14 @@ torch.set_default_device(device)
 generator = torch.Generator(device=device)
 
 GAMMA = 0.99 # how much future reward are taken into account
-LEARNING_RATE_POLICY = 1e-5 
+LEARNING_RATE_POLICY = 1e-4
 LEARNING_RATE_VALUE = 1e-4
-ENTROPY_BETA = 5e-5
+ENTROPY_BETA = 1e-3
 NB_EPISODES = 500
 MAX_STEPS = 64*2 + 69 # multiple du batch size c'est mieux sinon des fois on a des batchs pas de la même taille.
 BATCH_SIZE = 32 # prendre des puissance de 2
 UPDATE_VALUE_NET_PERIOD = 16  # periode d'update du value netork pendant un episode (le policy network lui ne s'update que à la fin de l'épisode)
-BATCH_SIZE_VALUE = 8 # batch size pour l'update du value network
+BATCH_SIZE_VALUE = 16 # batch size pour l'update du value network
 OUTBOUND_LOSS = True
 ENTROPY_LOSS = True
 WEIGHTS_LOSS_VALUE_NET = True
@@ -106,7 +106,6 @@ def optimize_batch(states_map_batch, states_vector_batch, actions_batch, returns
     
     Args:
         mode (str): Update mode
-            - "both": Update both policy and value networks
             - "value": Update only value network
             - "policy": Update only policy network
     """
@@ -122,8 +121,6 @@ def optimize_batch(states_map_batch, states_vector_batch, actions_batch, returns
         # Forward pass
         means, log_stds = policy_net(states_map_batch, states_vector_batch)
         values = value_net(states_map_batch, states_vector_batch).squeeze()
-
-        #print("means : ",means)
 
         # Ensure proper dimensions for values
         if values.dim() == 0:
@@ -146,7 +143,6 @@ def optimize_batch(states_map_batch, states_vector_batch, actions_batch, returns
         if advantages.numel() > 1:
             advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
-        #print(f"advantages : {advantages}")
         # Policy loss with proper scaling
         policy_loss = -(log_probs * advantages).mean() 
 
@@ -157,8 +153,6 @@ def optimize_batch(states_map_batch, states_vector_batch, actions_batch, returns
         # Entropy regularization
         entropy_loss = -ENTROPY_BETA * (log_stds + 0.5 * math.log(2 * math.pi * math.e)).sum(dim=1).mean()
         
-        # Value loss
-
         # L2 regularization (weight decay)
         l2_lambda = 1e-6
         l2_policy_loss = l2_lambda* sum(torch.sum(param ** 2) for param in policy_net.parameters())
@@ -174,8 +168,6 @@ def optimize_batch(states_map_batch, states_vector_batch, actions_batch, returns
             total_policy_loss += entropy_loss
         if WEIGHTS_LOSS_POLICY_NET: 
             total_policy_loss += l2_policy_loss
-        # if WEIGHTS_LOSS_VALUE_NET:
-        #     value_loss += l2_value_loss
 
         LossPolicy.append(total_policy_loss.item())
         LossValue.append(value_loss.item()) # just for logging
@@ -188,6 +180,7 @@ def optimize_batch(states_map_batch, states_vector_batch, actions_batch, returns
         # BACKPROP POLICY NET
         optimizer_policy.zero_grad()
         total_policy_loss.backward()
+        
         # total_norm = 0.0
         # for p in policy_net.parameters():
         #     if p.grad is not None:
@@ -198,12 +191,6 @@ def optimize_batch(states_map_batch, states_vector_batch, actions_batch, returns
         if CLIP_GRADIENTS_POLICY:
             torch.nn.utils.clip_grad_norm_(policy_net.parameters(), max_norm=0.5)
         optimizer_policy.step()
-
-        # BACKPROP VALUE NET
-        # optimizer_value.zero_grad()
-        # value_loss.backward()
-        # #torch.nn.utils.clip_grad_norm_(value_net.parameters(), max_norm=0.5)
-        # optimizer_value.step()
     
     elif mode == "value" : 
         returns_batch = returns_batch.to(device)
@@ -306,8 +293,6 @@ def train(n_frames_stack=1,n_frame_skip=1,grid_resolution = 8,map_channels = 2):
         for key, value in PARAMS.items():
             f.write(f"{key}: {value}\n")
 
-        
-
     map_training = M1()
     playground = map_training.construct_playground(drone_type=MyDroneHulk)
 
@@ -386,20 +371,24 @@ def train(n_frames_stack=1,n_frame_skip=1,grid_resolution = 8,map_channels = 2):
                     i = 0
                 for drone in map_training.drones:
                     drone.timestep_count = step
-                    #drone.showMaps(display_zoomed_position_grid=True, display_zoomed_grid=True)
+                    #drone.showMaps(display_zoomed_position_grid=False, display_zoomed_grid=False)
                     actions_drones = {drone: drone.process_actions([0, 0, i]) for drone in map_training.drones}
                     drone.update_map_pose_speed()
                 playground.step(actions_drones)
             
             # TRAINNING STARTS HERE
             else : 
+                """
+                Première étape : 
+                - On récupère l'état s (map + global state)
+                - On choisit une action a
+                """   
+             
                 if step % n_frame_skip == 0: # frame skipping
                     for drone in map_training.drones:
                         drone.timestep_count = step
                         #drone.showMaps(display_zoomed_position_grid=True, display_zoomed_grid=True)
                         
-                        # Get current frame
-
                         # 2 map channels : grid + position grid
                         if map_channels ==2 : 
                             current_maps = torch.from_numpy(np.stack((drone.grid.grid, drone.grid.position_grid),axis=0)).unsqueeze(0)
@@ -410,8 +399,6 @@ def train(n_frames_stack=1,n_frame_skip=1,grid_resolution = 8,map_channels = 2):
                             raise ValueError("map_channels must be 1 or 2")
                         
                         current_maps = current_maps.float().to(device)
-                        #print(f"shape of the maps : {current_maps.shape}")
-
                         current_global_state = drone.process_state_before_network(drone.estimated_pose.position[0],
                             drone.estimated_pose.position[1],
                             drone.estimated_pose.orientation,
@@ -419,7 +406,6 @@ def train(n_frames_stack=1,n_frame_skip=1,grid_resolution = 8,map_channels = 2):
                             drone.estimated_pose.vitesse_Y,
                             drone.estimated_pose.vitesse_angulaire)
                         
-
                         # Update frame buffer
                         frame_buffers[drone].append(current_maps)
                         global_state_buffer[drone].append(current_global_state) # global_state_buffer[drone] = deque([tensor([x,y,...],tensor([..],))]
@@ -438,10 +424,21 @@ def train(n_frames_stack=1,n_frame_skip=1,grid_resolution = 8,map_channels = 2):
                         actions_drones[drone] = drone.process_actions(action)
                         actions.append(action)
                 
+                """"
+                Deuxième étape :
+                - On applique l'action sur l'environnement
+                """
+
                 # Si on est dans une skip-frame cela va répéter la dernière action.
                 # Si non cela fait la nouvelle action
                 playground.step(actions_drones) 
 
+                """
+                Troisième étape :
+                - On update l'environnement
+                - On récupère l'état suivant s'
+                - On calcule la récompense r
+                """
                 if step % n_frame_skip == 0:
                     for drone in map_training.drones:
                         
@@ -474,41 +471,43 @@ def train(n_frames_stack=1,n_frame_skip=1,grid_resolution = 8,map_channels = 2):
                         
                         reward = drone.compute_reward(is_collision, found_wounded, 1,actions_drones[drone])
                         
-                        if done or (step == MAX_STEPS):
-                            target = reward
+                        if (step == MAX_STEPS):
+                            # compute total exploration score
+                            target = np.exp(5 * drone.grid.grid_score / (drone.grid.x_max_grid * drone.grid.y_max_grid))
+                            print(f"Exploration score: {target}")
                         else:
                             target = reward + GAMMA * value_next
                         
                         rewards.append(target)
-                        
                         total_reward += reward
                         
                         if done:
                             print("found wounded !")
 
                 else : 
+                    print("Ne devrait pas passer ici")
                     for drone in map_training.drones:
                         drone.update_map_pose_speed()
                 
-                if step % UPDATE_VALUE_NET_PERIOD == 0 : 
-                    # UPTDATE VALUE NETWORK
-                    rewards_value = rewards[-UPDATE_VALUE_NET_PERIOD:]
-                    states_map_value = states_map[-UPDATE_VALUE_NET_PERIOD:]
-                    states_vector_value = states_vector[-UPDATE_VALUE_NET_PERIOD:]
-                    actions_vector_value = actions[-UPDATE_VALUE_NET_PERIOD:]
-                    dataset = DroneDataset(states_map_value, states_vector_value, actions_vector_value, rewards_value)
-                    data_loader = DataLoader(dataset, batch_size=BATCH_SIZE_VALUE, shuffle=True,generator = generator)
-                    for batch in data_loader:
-                        states_map_b, states_vector_b, actions_b, returns_b = batch
-                        optimize_batch(states_map_b, states_vector_b, actions_b, returns_b, policy_net, value_net, optimizer_policy, optimizer_value, device,"value")
-                        optimize_batch(states_map_b, states_vector_b, actions_b, returns_b, policy_net, value_net, optimizer_policy, optimizer_value, device,"policy")     
-
+                # if step % UPDATE_VALUE_NET_PERIOD == 0 : 
+                #     # UPTDATE VALUE NETWORK
+                    
         if any([drone.drone_health<=0 for drone in map_training.drones]):
             map_training = M1()
             playground = map_training.construct_playground(drone_type=MyDroneHulk)
-            
-
         
+        rewards_value = rewards[:]
+        states_map_value = states_map[:]
+        states_vector_value = states_vector[:]
+        actions_vector_value = actions[:]
+        dataset = DroneDataset(states_map_value, states_vector_value, actions_vector_value, rewards_value)
+        data_loader = DataLoader(dataset, batch_size=BATCH_SIZE_VALUE, shuffle=True,generator = generator)
+        for batch in data_loader:
+            states_map_b, states_vector_b, actions_b, returns_b = batch
+            optimize_batch(states_map_b, states_vector_b, actions_b, returns_b, policy_net, value_net, optimizer_policy, optimizer_value, device,"value")
+            optimize_batch(states_map_b, states_vector_b, actions_b, returns_b, policy_net, value_net, optimizer_policy, optimizer_value, device,"policy")     
+
+
         # Optimize the policy and value networks in batches
         returns = rewards
         rewards_per_episode.append(total_reward)

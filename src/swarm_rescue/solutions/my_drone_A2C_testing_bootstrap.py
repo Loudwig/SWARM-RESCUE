@@ -275,6 +275,11 @@ class MyDroneHulk(DroneAbstract):
                 self.grid.display(self.grid.zoomed_grid ,
                                     self.estimated_pose,
                                     title="zoomed occupancy grid")
+            
+            if self.display_map:
+                self.grid.display(self.grid.grid,
+                                self.estimated_pose,
+                                title="Occupancy grid")
 
     # Use this function only at one place in the control method. Not handled othewise.
     # params : variables_to_log : dict of variables to log with keys as variable names and values as variable values.

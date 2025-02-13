@@ -118,12 +118,12 @@ class MyDroneHulk(DroneAbstract):
         reward += self.grid.exploration_score
 
         if reward <= 0 : 
-            reward -= 5
+            reward -= 3
 
         # Penalize collisions heavily
 
         if is_collision:
-            reward -= 10
+            reward -= 30
 
         if found_wounded:
             reward += 200
@@ -136,7 +136,7 @@ class MyDroneHulk(DroneAbstract):
         if (abs(forward) < 0.5 and abs(lateral) < 0.5 and abs(rotation) < 0.5):
             #print("actions not saturated")
             pass
-            
+          
         return reward
 
     def state_update(self,found_wounded):
@@ -151,12 +151,9 @@ class MyDroneHulk(DroneAbstract):
     def update_map_pose_speed(self):
         
         if self.timestep_count == 1: # first iteration
-            # print("Starting control")
             start_x, start_y = self.measured_gps_position() # never none ? 
-            # print(f"Initial position: {start_x}, {start_y}")
             self.grid.set_initial_cell(start_x, start_y)
         
-
         self.estimated_pose = Pose(np.asarray(self.measured_gps_position()),
                                    self.measured_compass_angle(),self.odometer_values(),self.previous_position[-1],self.previous_orientation[-1],self.size_area)
         
@@ -177,7 +174,7 @@ class MyDroneHulk(DroneAbstract):
                 self.grid.display(self.grid.zoomed_grid ,
                                     self.estimated_pose,
                                     title="zoomed occupancy grid")
-
+            
     # Use this function only at one place in the control method. Not handled othewise.
     # params : variables_to_log : dict of variables to log with keys as variable names and values as variable values.
     def logging_variables(self, variables_to_log):
@@ -229,6 +226,9 @@ class MyDroneHulk(DroneAbstract):
 
     def process_state_before_network(self,positionX,positionY,orientation,vitesse_X,vitesse_Y,vitesse_angulaire):
         Px,Py = self.grid._conv_world_to_grid(positionX,positionY)
+        Px = Px/self.grid.x_max_grid
+        Py = Py/self.grid.y_max_grid
+        orientation = orientation/(math.pi)
         state_tensor = torch.tensor([Px,Py,orientation,vitesse_X,vitesse_Y,vitesse_angulaire], dtype=torch.float32, device=device)
         #print("state tensor", state_tensor)
         return state_tensor

@@ -23,7 +23,7 @@ class NetworkPolicy(nn.Module):
 
         # calculate the output size of the CNN
         with torch.no_grad():
-            print(f"test : {h,w}")
+            print(f"MAP DIMENSIONS : {h,w}")
             dummy_input = torch.zeros(1, self.input_channels, h, w)
             dummy_output = self.cnn(dummy_input)
             cnn_flatten_size = dummy_output.numel()
