@@ -30,7 +30,7 @@ from solutions.utils.NetworkPolicy import NetworkPolicy
 from solutions.utils.NetworkValuebootstrap import NetworkValue
 import os
 
-PATH_TRAINED_MODEL = "solutions/trained_models/run_20250129-183839"
+PATH_TRAINED_MODEL = "solutions/trained_models/run_20250213-231014"
 
 class MyDroneHulk(DroneAbstract):
     class State(Enum):
@@ -66,7 +66,9 @@ class MyDroneHulk(DroneAbstract):
                     elif "n_frames_stack" in line:
                         self.frame_stack = int(line.split(":")[1])
                         print(f"Frame stack found in hyperparameters: {self.frame_stack}")
-                   
+                    elif "map_channels" in line : 
+                        self.map_channels = int(line.split(":")[1])
+                        print(f"Map channels found in hyperparameters: {self.map_channels}")
 
         except Exception as e:
             print(f"Error reading hyperparameters: {e}")
@@ -89,7 +91,7 @@ class MyDroneHulk(DroneAbstract):
 
         
         for _ in range(self.frame_stack):
-            self.frame_buffer.append(torch.zeros((1,1,self.grid.grid.shape[0], self.grid.grid.shape[1]), dtype=torch.float32, device=device))
+            self.frame_buffer.append(torch.zeros((1,self.map_channels,self.grid.grid.shape[0], self.grid.grid.shape[1]), dtype=torch.float32, device=device))
             self.state_buffer.append(torch.zeros((1,6), dtype=torch.float32, device=device))
         
         # Par défaut on load un model. Si on veut l'entrainer il faut redefinir policy net et value net        
@@ -100,8 +102,8 @@ class MyDroneHulk(DroneAbstract):
             self.policy_model_path =os.path.join(PATH_TRAINED_MODEL,"policy_net.pth")
             self.value_model_path = os.path.join(PATH_TRAINED_MODEL,"value_net.pth")
 
-            self.policy_net = NetworkPolicy(h=self.grid.grid.shape[0],w=self.grid.grid.shape[1],frame_stack=self.frame_stack)
-            self.value_net = NetworkValue(h=self.grid.grid.shape[0],w=self.grid.grid.shape[1],frame_stack=self.frame_stack)
+            self.policy_net = NetworkPolicy(map_channels=self.map_channels,h=self.grid.grid.shape[0],w=self.grid.grid.shape[1],frame_stack=self.frame_stack)
+            self.value_net = NetworkValue(map_channels=self.map_channels,h=self.grid.grid.shape[0],w=self.grid.grid.shape[1],frame_stack=self.frame_stack)
             self.policy_net.load_state_dict(torch.load(self.policy_model_path,map_location=torch.device('cpu')))
             self.value_net.load_state_dict(torch.load(self.value_model_path,map_location=torch.device('cpu')))
             self.policy_net.to(device)
@@ -153,16 +155,31 @@ class MyDroneHulk(DroneAbstract):
                 return {"forward": 0, "lateral": 0, "rotation": i, "grasper": 0}
         else : 
             if self.timestep_count % self.frame_skipping == 0:
-                #print( f"EXPLORATION SCORE : {self.grid.exploration_score}")
-                maps = torch.from_numpy(self.grid.grid).unsqueeze(0).unsqueeze(0)
-                maps = maps.float()            
-                global_state = torch.tensor([self.estimated_pose.position[0], self.estimated_pose.position[1], self.estimated_pose.orientation, self.estimated_pose.vitesse_X, self.estimated_pose.vitesse_Y, self.estimated_pose.vitesse_angulaire], dtype=torch.float32, device=device).unsqueeze(0)
+                print( f"EXPLORATION SCORE : {self.grid.exploration_score}")
+                 #2 map channels : grid + position grid
+                if self.map_channels == 2 : 
+                    maps = torch.from_numpy(np.stack((self.grid.grid, self.grid.position_grid),axis=0)).unsqueeze(0)
+                # 1 map channel : grid
+                elif self.map_channels == 1 :
+                    maps = torch.from_numpy(self.grid.grid).unsqueeze(0).unsqueeze(0)
+                else : 
+                    raise ValueError("map_channels must be 1 or 2")
+        
+                maps = maps.float() 
+                global_state = self.process_state_before_network(self.estimated_pose.position[0],
+                            self.estimated_pose.position[1],
+                            self.estimated_pose.orientation,
+                            self.estimated_pose.vitesse_X,
+                            self.estimated_pose.vitesse_Y,
+                            self.estimated_pose.vitesse_angulaire)           
+                
                 self.frame_buffer.append(maps)
                 self.state_buffer.append(global_state)
                 stacked_frames = torch.cat(list(self.frame_buffer), dim=1)
-                stacked_states = torch.cat(list(self.state_buffer), dim=1)
+                stacked_states = torch.cat(list(self.state_buffer)).unsqueeze(0)
                 #print(f" shape de global state stacked{stacked_states.shape}")
                 action,_ = self.select_action(stacked_frames,stacked_states)
+                print(f"Action : {action}")
                 command = self.process_actions(action)
                 self.previous_command = command
             else : 
@@ -174,10 +191,10 @@ class MyDroneHulk(DroneAbstract):
             reward = self.compute_reward(is_collision, found_wounded, 1,command)
             # nulle commande 
             #command = {"forward": 0, "lateral": 0, "rotation": 0, "grasper": 0}
-            print(f"time step : {self.timestep_count}")
-            print(f"Reward : {reward}")   
-            if self.timestep_count >= 300 : 
-                print("End of trainning")
+            # print(f"time step : {self.timestep_count}")
+            # print(f"Reward : {reward}")   
+            # if self.timestep_count >= 300 : 
+            #     print("End of trainning")
             return command
 
     def process_semantic_sensor(self):
@@ -324,9 +341,13 @@ class MyDroneHulk(DroneAbstract):
 
     def process_state_before_network(self,positionX,positionY,orientation,vitesse_X,vitesse_Y,vitesse_angulaire):
         Px,Py = self.grid._conv_world_to_grid(positionX,positionY)
-        #print(f"Px,Py : {Px,Py}")
-        return torch.tensor([Px,Py,orientation,vitesse_X,vitesse_Y,vitesse_angulaire], dtype=torch.float32, device=device).unsqueeze(0)
-
+        Px = Px/self.grid.x_max_grid
+        Py = Py/self.grid.y_max_grid
+        orientation = orientation/(math.pi)
+        state_tensor = torch.tensor([Px,Py,orientation,vitesse_X,vitesse_Y,vitesse_angulaire], dtype=torch.float32, device=device)
+        #print("state tensor", state_tensor)
+        return state_tensor
+    
     def process_actions(self,actions):
         return {
             "forward": actions[0],
@@ -335,36 +356,55 @@ class MyDroneHulk(DroneAbstract):
             "grasper": 0  # 0 or 1 for grasping
         }
 
-    def select_action(self, state_map,state_vector):
-        
-        state_map = torch.FloatTensor(state_map).to(device)
-        state_vector = torch.FloatTensor(state_vector).to(device)
-        means, log_stds = self.policy_net(state_map,state_vector)
+    
+    def select_action(self,state_map,state_vector):
+        # Debugging and type-checking for state_map
+        if isinstance(state_map, list):
+            state_map = np.array(state_map)
+            #print('Converted state_map to numpy array.')
+        elif isinstance(state_map, torch.Tensor):
+            #print('State_map is already a tensor.')
+            pass
+
+        if not isinstance(state_map, torch.Tensor):
+            state_map = torch.FloatTensor(state_map)  # Convert to tensor if not already
+        state_map = state_map  # Ensure it's on the correct device
+
+        # Debugging and type-checking for state_vector
+        if isinstance(state_vector, list):
+            state_vector = np.array(state_vector)
+            #print('Converted state_vector to numpy array.')
+        elif isinstance(state_vector, torch.Tensor):
+            #print('State_vector is already a tensor.')
+            pass
+
+        if not isinstance(state_vector, torch.Tensor):
+            state_vector = torch.FloatTensor(state_vector)  # Convert to tensor if not already
+        state_vector = state_vector  # Ensure it's on the correct device
+
+        # Policy network forward pass
+        means, log_stds = self.policy_net(state_map, state_vector)
 
         # Sample continuous actions
         stds = torch.exp(log_stds)
-        sampled_continuous_actions = means + torch.randn_like(means) * stds
-
-        # print(f"actions before tanh: {sampled_continuous_actions}")
+        sampled_continuous_actions = means + torch.randn_like(means) * stds # utilisation de rsample ? 
         continuous_actions = torch.tanh(sampled_continuous_actions)
-        # print(f"actions after tanh: {continuous_actions}")
-        
-        # Compute log probabilities 
-        # log prob with tanh squashing and gaussian prob
-        log_probs_continuous = -0.5 * (((sampled_continuous_actions - means) / (stds + 1e-8)) ** 2 + 2 * log_stds + math.log(2 * math.pi))
-        log_probs_continuous = log_probs_continuous.sum(dim=1)
 
-        log_probs_continuous = log_probs_continuous - torch.sum(torch.log(1 - continuous_actions ** 2 + 1e-6), dim=1)
+        # Compute log probabilities
+        log_probs_continuous = -0.5 * (
+            ((sampled_continuous_actions - means) / (stds + 1e-8)) ** 2 +
+            2 * log_stds + math.log(2 * math.pi)
+        )
+        log_probs_continuous = log_probs_continuous.sum(dim=1)
+        log_probs_continuous -= torch.sum(torch.log(1 - continuous_actions ** 2 + 1e-6), dim=1)
 
         # Combine actions
         action = continuous_actions[0]
-        #print(f"action: {action}")
         
         if torch.isnan(action).any():
             print("NaN detected in action")
             return [0, 0, 0], None
-        
-        log_prob = log_probs_continuous 
+
+        log_prob = log_probs_continuous
+
         return action.detach().cpu(), log_prob
-
-

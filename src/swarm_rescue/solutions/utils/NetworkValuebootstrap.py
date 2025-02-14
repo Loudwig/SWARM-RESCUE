@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import math
 
 class NetworkValue(nn.Module):
-    def __init__(self, map_channels= 1,h =100,w = 63,cnn_output_dim = 64,global_state_dim = 6,hidden_size = 32,num_actions = 3,frame_stack=1):
+    def __init__(self, map_channels= 2,h =100,w = 63,cnn_output_dim = 64,global_state_dim = 6,hidden_size = 32,num_actions = 3,frame_stack=1):
         super(NetworkValue, self).__init__()
         
         self.input_channels = map_channels 
