@@ -470,7 +470,7 @@ def train(n_frames_stack=1,n_frame_skip=1,grid_resolution = 8,map_channels = 2):
 
 
                         found_wounded = drone.process_semantic_sensor()
-                        done = found_wounded
+                        #done = found_wounded
                         min_dist = drone.process_lidar_sensor(drone.lidar())
                         is_collision = min_dist < 10
                         
