@@ -169,6 +169,8 @@ def optimize_batch(states_map_batch, states_vector_batch, actions_batch, returns
         if WEIGHTS_LOSS_POLICY_NET: 
             total_policy_loss += l2_policy_loss
 
+        total_policy_loss += value_loss
+
         LossPolicy.append(total_policy_loss.item())
         LossValue.append(value_loss.item()) # just for logging
         LossEntropy.append(entropy_loss.item())
@@ -190,6 +192,9 @@ def optimize_batch(states_map_batch, states_vector_batch, actions_batch, returns
         #print(f"[DEBUG] Norme L2 du gradient Policy = {total_norm:.4f}")
         if CLIP_GRADIENTS_POLICY:
             torch.nn.utils.clip_grad_norm_(policy_net.parameters(), max_norm=0.5)
+        if CLIP_GRADIENTS_VALUE:
+            torch.nn.utils.clip_grad_norm_(value_net.parameters(), max_norm=0.5)
+        
         optimizer_policy.step()
     
     elif mode == "value" : 
@@ -504,8 +509,8 @@ def train(n_frames_stack=1,n_frame_skip=1,grid_resolution = 8,map_channels = 2):
         data_loader = DataLoader(dataset, batch_size=BATCH_SIZE_VALUE, shuffle=True,generator = generator)
         for batch in data_loader:
             states_map_b, states_vector_b, actions_b, returns_b = batch
-            optimize_batch(states_map_b, states_vector_b, actions_b, returns_b, policy_net, value_net, optimizer_policy, optimizer_value, device,"value")
-            optimize_batch(states_map_b, states_vector_b, actions_b, returns_b, policy_net, value_net, optimizer_policy, optimizer_value, device,"policy")     
+            optimize_batch(states_map_b, states_vector_b, actions_b, returns_b, policy_net, value_net, optimizer_policy, optimizer_value, device,"policy")
+            #optimize_batch(states_map_b, states_vector_b, actions_b, returns_b, policy_net, value_net, optimizer_policy, optimizer_value, device,"policy")     
 
 
         # Optimize the policy and value networks in batches
