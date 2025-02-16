@@ -126,7 +126,7 @@ class MyDroneHulk(DroneAbstract):
             reward -= 30
 
         if found_wounded:
-            reward += 200
+            reward += 0
         
 
         # Penalize idling or lack of movement
