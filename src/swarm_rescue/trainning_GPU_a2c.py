@@ -560,14 +560,14 @@ def train(n_frames_stack=1,n_frame_skip=1,grid_resolution = 8,map_channels = 2):
     with open(rewards_csv_path, 'w', newline='') as csv_file:
         csv_writer = csv.writer(csv_file)
         # Header
-        csv_writer.writerow(["Episode", "TotalReward"])
+        csv_writer.writerow(["Step", "TotalReward"])
         # Rows
         for i, reward in enumerate(rewards_per_episode):
             csv_writer.writerow([i, reward])
     drone_destroyed_csv_path = os.path.join(folder_name, "drone_destroyed.csv")
     with open(drone_destroyed_csv_path,"w",newline='') as csv_file:
         csv_writer = csv.writer(csv_file)
-        csv_writer.writerow(["episode","DroneDestroyed"])
+        csv_writer.writerow(["Step","DroneDestroyed"])
         for i, drone_destroyed in enumerate(DroneDestroyed):
             csv_writer.writerow([i,drone_destroyed])
 
