@@ -19,7 +19,7 @@ from spg_overlay.entities.drone_distance_sensors import DroneSemanticSensor
 
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-model_path = os.path.join(os.path.dirname(__file__), 'policy_net_ppo.pth')
+model_path = os.path.join(os.path.dirname(__file__), 'policy_net_ppo_no_map.pth')
 
 
 class PolicyNetwork(nn.Module):
@@ -53,7 +53,7 @@ class MyDroneEval(DroneAbstract):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.policy_net = PolicyNetwork(state_dim=19, action_dim=4)  # 18 Lidar + 2 Semantic
+        self.policy_net = PolicyNetwork(state_dim=185, action_dim=4)  # 18 Lidar + 2 Semantic
         self.policy_net.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
         self.state = self.Activity.SEARCHING_WOUNDED
 
@@ -75,9 +75,9 @@ class MyDroneEval(DroneAbstract):
 def preprocess_lidar(lidar_values):
     """Groups lidar rays into 18 sectors and computes mean distance per sector."""
     if lidar_values is None or len(lidar_values) == 0:
-        return np.zeros(15)  # Default to zeros if no data
+        return np.zeros(181)  # Default to zeros if no data
 
-    num_sectors = 15
+    num_sectors = 181
     sector_size = len(lidar_values) // num_sectors
 
     aggregated = [np.mean(lidar_values[i * sector_size:(i + 1) * sector_size]) for i in range(num_sectors)]
