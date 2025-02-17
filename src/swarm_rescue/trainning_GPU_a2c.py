@@ -319,6 +319,7 @@ def train(n_frames_stack=1,n_frame_skip=1,grid_resolution = 8,map_channels = 2):
     global_state_buffer = { drone : deque(maxlen= n_frames_stack) for drone in map_training.drones}
     rewards_per_episode = []
     done = False
+    DroneDestroyed = []
     for episode in range(NB_EPISODES):
         playground.reset()
         
@@ -498,9 +499,11 @@ def train(n_frames_stack=1,n_frame_skip=1,grid_resolution = 8,map_channels = 2):
                 #     # UPTDATE VALUE NETWORK
                     
         if any([drone.drone_health<=0 for drone in map_training.drones]):
+            DroneDestroyed.append(1)
             map_training = M1()
             playground = map_training.construct_playground(drone_type=MyDroneHulk)
-        
+        else : 
+            DroneDestroyed.append(0)
         rewards_value = rewards[:]
         states_map_value = states_map[:]
         states_vector_value = states_vector[:]
@@ -557,10 +560,17 @@ def train(n_frames_stack=1,n_frame_skip=1,grid_resolution = 8,map_channels = 2):
     with open(rewards_csv_path, 'w', newline='') as csv_file:
         csv_writer = csv.writer(csv_file)
         # Header
-        csv_writer.writerow(["Step", "TotalReward"])
+        csv_writer.writerow(["Episode", "TotalReward"])
         # Rows
         for i, reward in enumerate(rewards_per_episode):
             csv_writer.writerow([i, reward])
+    drone_destroyed_csv_path = os.path.join(folder_name, "drone_destroyed.csv")
+    with open(drone_destroyed_csv_path,"w",newline='') as csv_file:
+        csv_writer = csv.writer(csv_file)
+        csv_writer.writerow(["episode","DroneDestroyed"])
+        for i, drone_destroyed in enumerate(DroneDestroyed):
+            csv_writer.writerow([i,drone_destroyed])
+
     torch.save(policy_net.state_dict(), os.path.join(folder_name,"policy_net.pth"))
     torch.save(value_net.state_dict(), os.path.join(folder_name,"value_net.pth"))    
     print("Training complete. Files saved in:", folder_name)

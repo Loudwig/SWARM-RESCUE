@@ -28,6 +28,7 @@ fi
 # Define paths for loss file and rewards file
 loss_file="${destination}/${target_dir}/losses.csv"
 rewards_file="${destination}/${target_dir}/rewards_per_episode.csv"
+destroyed_file="${destination}/${target_dir}/drone_destroyed.csv"
 
 # Verify if the loss file exists
 if [ -f "$loss_file" ]; then
@@ -57,4 +58,17 @@ if [ -f "$rewards_file" ]; then
     fi
 else
     echo "Error: Rewards file '$rewards_file' does not exist."
+fi
+if [ -f "$destroyed_file" ]; then
+    # Launch the Python script to plot losses
+    python3 /Users/rplanchon/Documents/projet/swarmRescue/SWARM-RESCUE/src/swarm_rescue/solutions/plot_losses.py "$destroyed_file"
+
+    # Check if the Python script executed successfully for losses
+    if [ "$?" -eq 0 ]; then
+        echo "Python script to plot losses executed successfully."
+    else
+        echo "Python script to plot losses execution failed."
+    fi
+else
+    echo "Error: Loss file '$destroyed_file' does not exist."
 fi
