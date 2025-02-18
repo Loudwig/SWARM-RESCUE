@@ -115,6 +115,8 @@ class ActorCriticNetwork(nn.Module):
         )
         
     def forward(self, map, global_state):
+        assert not torch.isnan(map).any(), "NaN in map input"
+        assert not torch.isnan(global_state).any(), "NaN in global_state"
         x = self.cnn(map)
         x = x.view(x.size(0), -1)  # Flatten
         x = torch.relu(self.fc_cnn(x))
@@ -126,6 +128,7 @@ class ActorCriticNetwork(nn.Module):
         policy_features = self.policy_mlp(x_combined)
         mu = self.mu_head(policy_features)
         log_sigma = self.log_sigma_head(policy_features)
+        log_sigma = torch.clamp(log_sigma, min=-20, max=2)  # exp(-20)=2e-9, exp(2)=7.4
         
         # Branche valeur
         value = self.value_mlp(x_combined)
@@ -210,10 +213,21 @@ def optimize_batch(states_map_b, states_vector_b, actions_b, return_b, advantage
     #print(f"values_pred shape: {values_pred.shape}")
     #print(f"return_b shape: {return_b.shape}")
 
+
     values_pred = values_pred.squeeze()
 
-    policy_loss = -(logprobs_b * advantages_b).mean()
-    entropy_loss = -ENTROPY_BETA * logprobs_b.mean()
+    # Replace logprobs_b with newly computed log_probs
+    stds = torch.exp(log_sigma)
+    dist = torch.distributions.Normal(mu, stds)
+    new_logprobs = dist.log_prob(actions_b).sum(dim=1)
+    # Apply tanh correction
+    new_logprobs -= torch.sum(torch.log(1 - torch.tanh(actions_b)**2 + 1e-6), dim=1)
+    policy_loss = -(new_logprobs * advantages_b).mean()
+
+
+    entropy = dist.entropy().mean()
+    entropy_loss = -ENTROPY_BETA * entropy
+
     value_loss = nn.functional.mse_loss(values_pred, return_b)
     
     total_loss = policy_loss + entropy_loss + value_loss
@@ -240,7 +254,7 @@ def compute_reward(drone, is_collision, found_wounded, time_penalty, action):
         reward -= 30
     reward -= time_penalty
     if abs(forward) < 0.5 and abs(lateral) < 0.5 and abs(rotation) < 0.5:
-        pass
+        print("actions not saturated")
     return reward
 
 # =============================================================================
@@ -336,6 +350,7 @@ def train(n_frames_stack=1, n_frame_skip=1, grid_resolution=8, map_channels=2):
                 i = random.random() if step < 50 else 0
                 for drone in map_training.drones:
                     drone.timestep_count = step
+                    #drone.showMaps(display_zoomed_position_grid=True, display_zoomed_grid=True)
                     actions_drones = {drone: drone.process_actions([0, 0, i]) for drone in map_training.drones}
                     drone.update_map_pose_speed()
                 playground.step(actions_drones)
@@ -344,6 +359,8 @@ def train(n_frames_stack=1, n_frame_skip=1, grid_resolution=8, map_channels=2):
                 if step % n_frame_skip == 0:
                     for drone in map_training.drones:
                         drone.timestep_count = step
+                        #drone.showMaps(display_zoomed_position_grid=True, display_zoomed_grid=True)
+
                         if map_channels == 2:
                             current_maps = torch.from_numpy(np.stack((drone.grid.grid, drone.grid.position_grid), axis=0)).unsqueeze(0)
                         elif map_channels == 1:
@@ -388,7 +405,8 @@ def train(n_frames_stack=1, n_frame_skip=1, grid_resolution=8, map_channels=2):
                         rewards.append(reward)
                         total_reward += reward
                         if found_wounded:
-                            print("found wounded!")
+                            #print("found wounded!")
+                            pass
             
         if any(drone.drone_health <= 0 for drone in map_training.drones):
             DroneDestroyed.append(1)
