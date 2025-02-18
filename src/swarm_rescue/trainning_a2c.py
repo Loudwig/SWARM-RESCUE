@@ -254,7 +254,8 @@ def compute_reward(drone, is_collision, found_wounded, time_penalty, action):
         reward -= 30
     reward -= time_penalty
     if abs(forward) < 0.5 and abs(lateral) < 0.5 and abs(rotation) < 0.5:
-        print("actions not saturated")
+        # print("actions not saturated")
+        pass
     return reward
 
 # =============================================================================
