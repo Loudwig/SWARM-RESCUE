@@ -29,7 +29,7 @@ from solutions.utils.pose import Pose
 from solutions.utils.grid import OccupancyGrid
 from solutions.utils.astar import *
 from solutions.utils.NetworkPolicy import NetworkPolicy
-from solutions.utils.NetworkValuebootstrap import NetworkValue
+from solutions.utils.NetworkValue import NetworkValue
 from solutions.my_drone_A2C_trainning import MyDroneHulk
 
 from torch.utils.data import Dataset, DataLoader
@@ -39,14 +39,12 @@ torch.set_default_device(device)
 generator = torch.Generator(device=device)
 
 GAMMA = 0.99 # how much future reward are taken into account
-LEARNING_RATE_POLICY = 1e-4
-LEARNING_RATE_VALUE = 1e-4
+LEARNING_RATE = 1e-4
 ENTROPY_BETA = 1e-3
 NB_EPISODES = 500
 MAX_STEPS = 64*2 + 69 # multiple du batch size c'est mieux sinon des fois on a des batchs pas de la même taille.
-BATCH_SIZE = 32 # prendre des puissance de 2
-UPDATE_VALUE_NET_PERIOD = 16  # periode d'update du value netork pendant un episode (le policy network lui ne s'update que à la fin de l'épisode)
-BATCH_SIZE_VALUE = 16 # batch size pour l'update du value network
+BATCH_SIZE = 8 # prendre des puissance de 2
+NUM_EPOCHS = 4
 OUTBOUND_LOSS = True
 ENTROPY_LOSS = True
 WEIGHTS_LOSS_VALUE_NET = True
@@ -74,16 +72,14 @@ class DroneDataset:
         return self.states_maps[idx], self.states_vectors[idx], self.actions[idx], self.returns[idx]
 
 PARAMS = {
-    "learning_rate_policy" : LEARNING_RATE_POLICY,
-    "learning_rate_value" : LEARNING_RATE_VALUE,
+    "learning_rate_policy" : LEARNING_RATE,
     "entropy_beta" : ENTROPY_BETA,
     "nb_episodes" : NB_EPISODES,
     "max_steps" : MAX_STEPS,
     "batch_size" : BATCH_SIZE,
-    "update_value_net_period" : UPDATE_VALUE_NET_PERIOD,
-    "batch_size_value" : BATCH_SIZE_VALUE,
     "outbound_loss" : OUTBOUND_LOSS,
     "entropy_loss" : ENTROPY_LOSS,
+    "NUM_EPOCHS" : NUM_EPOCHS,
     "weights_loss_value_net" : WEIGHTS_LOSS_VALUE_NET,
     "weights_loss_policy_net" : WEIGHTS_LOSS_POLICY_NET,
 
@@ -100,7 +96,7 @@ LossWeightsPolicy = []
 
 
 def optimize_batch(states_map_batch, states_vector_batch, actions_batch, returns_batch, 
-                  policy_net, value_net, optimizer_policy, optimizer_value, device,mode):
+                  policy_net, value_net, optimizer, device):
     """
     Optimize networks based on collected experience
     
@@ -110,121 +106,107 @@ def optimize_batch(states_map_batch, states_vector_batch, actions_batch, returns
             - "policy": Update only policy network
     """
 
-    if mode == "policy" : 
 
-        # Move tensors to device and ensure proper dimensions
-        states_map_batch = states_map_batch.to(device)
-        states_vector_batch = states_vector_batch.to(device)
-        actions_batch = actions_batch.to(device)
-        returns_batch = returns_batch.to(device)
 
-        # Forward pass
-        means, log_stds = policy_net(states_map_batch, states_vector_batch)
-        values = value_net(states_map_batch, states_vector_batch).squeeze()
+    # Move tensors to device and ensure proper dimensions
+    states_map_batch = states_map_batch.to(device)
+    states_vector_batch = states_vector_batch.to(device)
+    actions_batch = actions_batch.to(device)
+    returns_batch = returns_batch.to(device)
 
-        # Ensure proper dimensions for values
-        if values.dim() == 0:
-            values = values.unsqueeze(0)
-        if returns_batch.dim() == 0:
-            returns_batch = returns_batch.unsqueeze(0)
+    # Forward pass
+    means, log_stds = policy_net(states_map_batch, states_vector_batch)
+    values = value_net(states_map_batch, states_vector_batch).squeeze()
 
-        # Continuous action log probabilities with error checking
-        stds = torch.exp(log_stds.clamp(min=-20, max=2))  # Prevent numerical instability
-        log_probs_continuous = -0.5 * (((actions_batch - means) / (stds + 1e-8)) ** 2 + 2 * log_stds + math.log(2 * math.pi))
-        log_probs_continuous = log_probs_continuous.sum(dim=1)
-        
-        # Safer tanh correction term
-        tanh_correction = torch.sum(torch.log(1 - actions_batch.pow(2) + 1e-6), dim=1)
-        log_probs = log_probs_continuous - tanh_correction
+    # Ensure proper dimensions for values
+    if values.dim() == 0:
+        values = values.unsqueeze(0)
+    if returns_batch.dim() == 0:
+        returns_batch = returns_batch.unsqueeze(0)
 
-        # Compute advantages with proper normalization
-        advantages = returns_batch.detach() - values.detach()
-        
-        if advantages.numel() > 1:
-            advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
-
-        # Policy loss with proper scaling
-        policy_loss = -(log_probs * advantages).mean() 
-
-        penalty_weight = 1e-5 # 
-        # PENELASIZE IF MEANS ARE OUTSIDE OF -1 ;1 
-        outbound_loss = penalty_weight* torch.mean((torch.relu(torch.abs(means) - 1)))
+    # Continuous action log probabilities with error checking
+    stds = torch.exp(log_stds.clamp(min=-20, max=2))  # Prevent numerical instability
+    log_probs_continuous = -0.5 * (((actions_batch - means) / (stds + 1e-8)) ** 2 + 2 * log_stds + math.log(2 * math.pi))
+    log_probs_continuous = log_probs_continuous.sum(dim=1)
     
-        # Entropy regularization
-        entropy_loss = -ENTROPY_BETA * (log_stds + 0.5 * math.log(2 * math.pi * math.e)).sum(dim=1).mean()
-        
-        # L2 regularization (weight decay)
-        l2_lambda = 1e-6
-        l2_policy_loss = l2_lambda* sum(torch.sum(param ** 2) for param in policy_net.parameters())
-        l2_value_loss = l2_lambda* sum(torch.sum(param ** 2) for param in value_net.parameters())
+    # Safer tanh correction term
+    tanh_correction = torch.sum(torch.log(1 - actions_batch.pow(2) + 1e-6), dim=1)
+    log_probs = log_probs_continuous - tanh_correction
 
-        total_policy_loss = policy_loss
-        value_loss = nn.functional.mse_loss(values, returns_batch) # just for printing
-
-
-        if OUTBOUND_LOSS:
-            total_policy_loss += outbound_loss
-        if ENTROPY_LOSS:
-            total_policy_loss += entropy_loss
-        if WEIGHTS_LOSS_POLICY_NET: 
-            total_policy_loss += l2_policy_loss
-
-        total_policy_loss += value_loss
-
-        LossPolicy.append(total_policy_loss.item())
-        LossValue.append(value_loss.item()) # just for logging
-        LossEntropy.append(entropy_loss.item())
-        LossOutbound.append(outbound_loss.item())
-        LossWeightsPolicy.append(l2_policy_loss.item())
-        LossExploration.append(policy_loss.item())
-        LossWeightsValue.append(l2_value_loss.item())
-
-        # BACKPROP POLICY NET
-        optimizer_policy.zero_grad()
-        total_policy_loss.backward()
-        
-        # total_norm = 0.0
-        # for p in policy_net.parameters():
-        #     if p.grad is not None:
-        #         param_norm = p.grad.data.norm(2)
-        #         total_norm += param_norm.item()**2
-        # total_norm = total_norm**0.5
-        #print(f"[DEBUG] Norme L2 du gradient Policy = {total_norm:.4f}")
-        if CLIP_GRADIENTS_POLICY:
-            torch.nn.utils.clip_grad_norm_(policy_net.parameters(), max_norm=0.5)
-        if CLIP_GRADIENTS_VALUE:
-            torch.nn.utils.clip_grad_norm_(value_net.parameters(), max_norm=0.5)
-        
-        optimizer_policy.step()
+    # Compute advantages with proper normalization
+    advantages = returns_batch.detach() - values.detach()
     
-    elif mode == "value" : 
-        returns_batch = returns_batch.to(device)
-        values = value_net(states_map_batch, states_vector_batch).squeeze()
-        # Ensure proper dimensions for values
-        if values.dim() == 0:
-            values = values.unsqueeze(0)
-        if returns_batch.dim() == 0:
-            returns_batch = returns_batch.unsqueeze(0)
-        
-        value_loss = nn.functional.mse_loss(values, returns_batch)
+    if advantages.numel() > 1:
+        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
-        # L2 regularization (weight decay)
-        l2_lambda = 1e-6
-        l2_value_loss = l2_lambda* sum(torch.sum(param ** 2) for param in value_net.parameters())
+    # Policy loss with proper scaling
+    policy_loss = -(log_probs * advantages).mean() 
 
-        # Add L2 regularization to the losses
-        if WEIGHTS_LOSS_VALUE_NET :
-            value_loss +=  l2_value_loss
-        
-        optimizer_value.zero_grad()
-        value_loss.backward()
-        if CLIP_GRADIENTS_VALUE:
-            torch.nn.utils.clip_grad_norm_(value_net.parameters(), max_norm=0.5)
-        optimizer_value.step()
+    penalty_weight = 1e-5 # 
+    # PENELASIZE IF MEANS ARE OUTSIDE OF -1 ;1 
+    outbound_loss = penalty_weight* torch.mean((torch.relu(torch.abs(means) - 1)))
+
+    # Entropy regularization
+    entropy_loss = -ENTROPY_BETA * (log_stds + 0.5 * math.log(2 * math.pi * math.e)).sum(dim=1).mean()
     
-    else : 
-        raise ValueError("mode non conforme")
+    # L2 regularization (weight decay)
+    l2_lambda = 1e-6
+    l2_policy_loss = l2_lambda* sum(torch.sum(param ** 2) for param in policy_net.parameters())
+    l2_value_loss = l2_lambda* sum(torch.sum(param ** 2) for param in value_net.parameters())
+
+    total_policy_loss = policy_loss
+    value_loss = nn.functional.mse_loss(values, returns_batch)
+
+    if OUTBOUND_LOSS:
+        total_policy_loss += outbound_loss
+    if ENTROPY_LOSS:
+        total_policy_loss += entropy_loss
+    if WEIGHTS_LOSS_POLICY_NET: 
+        total_policy_loss += l2_policy_loss
+    if WEIGHTS_LOSS_VALUE_NET:
+        total_policy_loss += l2_value_loss
+    total_policy_loss += value_loss
+
+    LossPolicy.append(total_policy_loss.item())
+    LossValue.append(value_loss.item()) # just for logging
+    LossEntropy.append(entropy_loss.item())
+    LossOutbound.append(outbound_loss.item())
+    LossWeightsPolicy.append(l2_policy_loss.item())
+    LossExploration.append(policy_loss.item())
+    LossWeightsValue.append(l2_value_loss.item())
+
+    optimizer.zero_grad()
+    total_policy_loss.backward()
     
+    if CLIP_GRADIENTS_POLICY:
+        torch.nn.utils.clip_grad_norm_(policy_net.parameters(), max_norm=0.5)
+    if CLIP_GRADIENTS_VALUE:
+        torch.nn.utils.clip_grad_norm_(value_net.parameters(), max_norm=0.5)
+    
+    optimizer.step()
+
+def compute_reward(self,is_collision, found_wounded, time_penalty,action):
+        forward = action["forward"]
+        lateral = action["lateral"]
+        rotation = action["rotation"]
+
+        reward = 0
+        reward += self.grid.exploration_score
+
+        # Penalize collisions heavily
+        if is_collision:
+            reward -= 30
+       
+        # Penalize idling or lack of movement
+        reward -= time_penalty
+
+        # give penalty when action are initialy not between -0.9 and 0.9 
+        if (abs(forward) < 0.5 and abs(lateral) < 0.5 and abs(rotation) < 0.5):
+            #print("actions not saturated")
+            pass
+          
+        return reward
+   
 def select_action(policy_net, state_map, state_vector):
     # Debugging and type-checking for state_map
     if isinstance(state_map, list):
@@ -309,8 +291,7 @@ def train(n_frames_stack=1,n_frame_skip=1,grid_resolution = 8,map_channels = 2):
     policy_net = NetworkPolicy(h=h_dummy,w=w_dummy,frame_stack=n_frames_stack,map_channels=map_channels).to(device)
     value_net = NetworkValue(h=h_dummy,w=w_dummy,map_channels=map_channels).to(device)
 
-    optimizer_policy = optim.Adam(policy_net.parameters(), lr=LEARNING_RATE_POLICY)
-    optimizer_value = optim.Adam(value_net.parameters(), lr=LEARNING_RATE_VALUE)
+    optimizer = optim.Adam(policy_net.parameters(), lr=LEARNING_RATE)
     policy_net.apply(lambda m: m.reset_parameters() if hasattr(m, 'reset_parameters') else None)
     value_net.apply(lambda m: m.reset_parameters() if hasattr(m, 'reset_parameters') else None)
 
@@ -411,6 +392,8 @@ def train(n_frames_stack=1,n_frame_skip=1,grid_resolution = 8,map_channels = 2):
                             drone.estimated_pose.vitesse_X,
                             drone.estimated_pose.vitesse_Y,
                             drone.estimated_pose.vitesse_angulaire)
+                        with torch.no_grad():
+                            value_current = value_net(current_maps, current_global_state).squeeze() 
                         
                         # Update frame buffer
                         frame_buffers[drone].append(current_maps)
@@ -475,7 +458,7 @@ def train(n_frames_stack=1,n_frame_skip=1,grid_resolution = 8,map_channels = 2):
                         min_dist = drone.process_lidar_sensor(drone.lidar())
                         is_collision = min_dist < 10
                         
-                        reward = drone.compute_reward(is_collision, found_wounded, 1,actions_drones[drone])
+                        reward = compute_reward(drone,is_collision, found_wounded, 1,actions_drones[drone])
                         
                         if (step == MAX_STEPS):
                             # compute total exploration score
@@ -504,29 +487,26 @@ def train(n_frames_stack=1,n_frame_skip=1,grid_resolution = 8,map_channels = 2):
             playground = map_training.construct_playground(drone_type=MyDroneHulk)
         else : 
             DroneDestroyed.append(0)
+        
         rewards_value = rewards[:]
         states_map_value = states_map[:]
         states_vector_value = states_vector[:]
         actions_vector_value = actions[:]
-        dataset = DroneDataset(states_map_value, states_vector_value, actions_vector_value, rewards_value)
-        data_loader = DataLoader(dataset, batch_size=BATCH_SIZE_VALUE, shuffle=True,generator = generator)
-        for batch in data_loader:
-            states_map_b, states_vector_b, actions_b, returns_b = batch
-            optimize_batch(states_map_b, states_vector_b, actions_b, returns_b, policy_net, value_net, optimizer_policy, optimizer_value, device,"policy")
-            #optimize_batch(states_map_b, states_vector_b, actions_b, returns_b, policy_net, value_net, optimizer_policy, optimizer_value, device,"policy")     
 
+        # Train for a number of epochs
+        for epoch in range(NUM_EPOCHS):
+            # Create new dataset and dataloader for each epoch
+            dataset = DroneDataset(states_map_value, states_vector_value, actions_vector_value, rewards_value)
+            data_loader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True, generator=generator)
+            
+            for batch in data_loader:
+                states_map_b, states_vector_b, actions_b, returns_b = batch
+                optimize_batch(states_map_b, states_vector_b, actions_b, returns_b, policy_net, value_net, optimizer, device)
 
-        # Optimize the policy and value networks in batches
         returns = rewards
         rewards_per_episode.append(total_reward)
 
-        #dataset = DroneDataset(states_map, states_vector, actions, returns)
-        #data_loader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True,generator = generator)
-        # for batch in data_loader:
-        #     states_map_b, states_vector_b, actions_b, returns_b = batch
-        #     optimize_batch(states_map_b, states_vector_b, actions_b, returns_b, policy_net, value_net, optimizer_policy, optimizer_value, device,"policy")
-
-        del states_map,states_vector, actions, rewards
+        del states_map, states_vector, actions, rewards
         
         if episode % 10 == 1:
             print(f"Episode {episode}, Reward: {total_reward}, Mean Last 10 Rewards: {np.mean(rewards_per_episode[-10:])}")
@@ -560,7 +540,7 @@ def train(n_frames_stack=1,n_frame_skip=1,grid_resolution = 8,map_channels = 2):
     with open(rewards_csv_path, 'w', newline='') as csv_file:
         csv_writer = csv.writer(csv_file)
         # Header
-        csv_writer.writerow(["Step", "TotalReward"])
+        csv_writer.writerow(["", "TotalReward"])
         # Rows
         for i, reward in enumerate(rewards_per_episode):
             csv_writer.writerow([i, reward])

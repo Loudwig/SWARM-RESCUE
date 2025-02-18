@@ -48,8 +48,8 @@ class NetworkPolicy(nn.Module):
         x = x.view(x.size(0), -1)
         # print(f"x shape after view: {x.shape}")
         x = F.relu(self.fc_cnn(x))
-        # print(f"x shape after fc_cnn: {x.shape}")
-        # print(f"global_state shape: {global_state.shape}")
+        #print(f"x shape after fc_cnn: {x.shape}")
+        #print(f"global_state shape: {global_state.shape}")
         x = torch.cat((x, global_state), dim=1) # On trans
         x = self.mlp(x) 
         mu = self.mu_head(x)

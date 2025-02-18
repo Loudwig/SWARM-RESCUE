@@ -14,6 +14,7 @@ import matplotlib.pyplot as plt
 import time
 import os
 import csv
+import random
 
 
 from maps.map_intermediate_01 import MyMapIntermediate01 as M1
@@ -27,49 +28,63 @@ from spg_overlay.utils.utils import circular_mean, normalize_angle
 from solutions.utils.pose import Pose
 from solutions.utils.grid import OccupancyGrid
 from solutions.utils.astar import *
-from solutions.utils.NetworkPolicy import NetworkPolicy
-from solutions.utils.NetworkValue import NetworkValue
+# from solutions.utils.NetworkPolicy import NetworkPolicy
+# from solutions.utils.NetworkValue import NetworkValue
 from solutions.my_drone_A2C_trainning import MyDroneHulk
-
+from solutions.utils.ActorCriticNetwork import ActorCriticNetwork
 from torch.utils.data import Dataset, DataLoader
 
 device = torch.device('cuda:2' if torch.cuda.is_available() else 'cpu')
 torch.set_default_device(device)
 generator = torch.Generator(device=device)
 
-class DroneDataset:
-    def __init__(self, states_maps, states_vectors, actions, returns):
-        # Ensure all elements in states_maps are tensors on the correct device
-        self.states_maps = torch.stack([
-            s.squeeze(0) if isinstance(s, torch.Tensor) else torch.FloatTensor(s).squeeze(0)
-            for s in states_maps
-        ])
-        
-        # Similarly handle states_vectors, actions, and returns if needed
-        self.states_vectors = torch.stack([sv.squeeze(0) for sv in states_vectors])
-        
-        #print(f"actions before dataset {actions}")
+GAMMA = 0.99 # how much future reward are taken into account
+LEARNING_RATE = 1e-4
+ENTROPY_BETA = 1e-3
+NB_EPISODES = 500
+MAX_STEPS = 64*2 + 69 # multiple du batch size c'est mieux sinon des fois on a des batchs pas de la même taille.
+BATCH_SIZE = 8 # prendre des puissance de 2
+NUM_EPOCHS = 4
+OUTBOUND_LOSS = True
+ENTROPY_LOSS = True
+WEIGHTS_LOSS_VALUE_NET = True
+WEIGHTS_LOSS_POLICY_NET = True
+CLIP_GRADIENTS_POLICY = True
+CLIP_GRADIENTS_VALUE = True
 
-        self.actions = torch.stack(actions)
-        #print(f"actions after dataset {self.actions}")
-        #print(f"returns before DroneDataset {returns}")
-        self.returns = torch.FloatTensor(returns)
-        #print(f"returns after DroneDataset {self.returns}")
+class DroneDataset:
+    def __init__(self, actions, returns, advantages, logprobs, values):
+        # No gradients needed
+        self.actions = torch.stack(actions).to(torch.float32).to(device)
+        self.returns = torch.tensor(returns, dtype=torch.float32).to(device)
+        self.advantages = torch.tensor(advantages, dtype=torch.float32).to(device)
+        
+        # Preserve gradients
+        self.logprobs = torch.tensor(logprobs, dtype=torch.float32).clone().detach().requires_grad_(True).to(device)
+        self.values = torch.tensor(values, dtype=torch.float32).clone().detach().requires_grad_(True).to(device)
 
 
     def __len__(self):
-        return len(self.states_maps)
+        return len(self.values)
 
     def __getitem__(self, idx):
-        return self.states_maps[idx], self.states_vectors[idx], self.actions[idx], self.returns[idx]
+        return self.actions[idx], self.returns[idx], self.advantages[idx], self.logprobs[idx],self.values[idx]
 
-GAMMA = 0.99
-LEARNING_RATE = 3e-6
-ENTROPY_BETA = 0.03
-NB_EPISODES = 2000
-MAX_STEPS = 64*5 # multiple du batch size c'est mieux sinon des fois on a des batchs pas de la même taille.
-BATCH_SIZE = 64 # prendre des puissance de 2
+PARAMS = {
+    "learning_rate_policy" : LEARNING_RATE,
+    "entropy_beta" : ENTROPY_BETA,
+    "nb_episodes" : NB_EPISODES,
+    "max_steps" : MAX_STEPS,
+    "batch_size" : BATCH_SIZE,
+    "outbound_loss" : OUTBOUND_LOSS,
+    "entropy_loss" : ENTROPY_LOSS,
+    "NUM_EPOCHS" : NUM_EPOCHS,
+    "weights_loss_value_net" : WEIGHTS_LOSS_VALUE_NET,
+    "weights_loss_policy_net" : WEIGHTS_LOSS_POLICY_NET,
 
+} 
+
+# Losses
 LossValue = []
 LossPolicy = []
 LossEntropy = []
@@ -79,193 +94,196 @@ LossExploration = []
 LossWeightsPolicy = []
 
 
-def compute_returns(rewards):
-    returns = []
-    g = 0
-    for reward in reversed(rewards):
-        g = (reward + GAMMA * g) # la somme ne va pas jusqu'à l'infini donc il faut peut être normalisé sinon les derniers termes ont beacoup moins de "puissance"
-        returns.insert(0, g)
-    #print("returns",returns)
-    #print(len(returns))
-    return returns # longeur du nombre de steps
-
-def optimize_batch(states_map_batch, states_vector_batch, actions_batch, returns_batch, 
-                  policy_net, value_net, optimizer_policy, optimizer_value, device):
+def optimize_batch(actions_b, return_b, advantages_b,logprobs_b,values_b, optimizer,policy_net,value_net, device):
+    """
+    Optimize networks based on collected experience
     
+    Args:
+        mode (str): Update mode
+            - "value": Update only value network
+            - "policy": Update only policy network
+    """
+
+
+
     # Move tensors to device and ensure proper dimensions
-    states_map_batch = states_map_batch.to(device)
-    states_vector_batch = states_vector_batch.to(device)
-    actions_batch = actions_batch.to(device)
-    returns_batch = returns_batch.to(device)
-    #print(f"return batch  {returns_batch }")
+    action_batch = actions_b.to(device)
+    return_batch = return_b.to(device)
+    advantages_batch = advantages_b.to(device)
+    logprob_batch = logprobs_b.to(device)
+    values_batch = values_b.to(device)
 
     # Forward pass
-    means, log_stds = policy_net(states_map_batch, states_vector_batch)
-    values = value_net(states_map_batch, states_vector_batch).squeeze()
+    # means, log_stds = policy_net(states_map_batch, states_vector_batch)
+    # values = value_net(states_map_batch, states_vector_batch).squeeze()
 
-    # Ensure proper dimensions for values
-    if values.dim() == 0:
-        values = values.unsqueeze(0)
-    if returns_batch.dim() == 0:
-        returns_batch = returns_batch.unsqueeze(0)
+    # # Ensure proper dimensions for values
+    # if values.dim() == 0:
+    #     values = values.unsqueeze(0)
+    if return_batch.dim() == 0:
+        return_batch = return_batch.unsqueeze(0)
 
-    # Continuous action log probabilities with error checking
-    stds = torch.exp(log_stds.clamp(min=-20, max=2))  # Prevent numerical instability
-    log_probs_continuous = -0.5 * (((actions_batch - means) / (stds + 1e-8)) ** 2 + 2 * log_stds + math.log(2 * math.pi))
-    log_probs_continuous = log_probs_continuous.sum(dim=1)
+    # # Continuous action log probabilities with error checking
+    # stds = torch.exp(log_stds.clamp(min=-20, max=2))  # Prevent numerical instability
+    # log_probs_continuous = -0.5 * (((actions_batch - means) / (stds + 1e-8)) ** 2 + 2 * log_stds + math.log(2 * math.pi))
+    # log_probs_continuous = log_probs_continuous.sum(dim=1)
     
-    # Safer tanh correction term
-    tanh_correction = torch.sum(torch.log(1 - actions_batch.pow(2) + 1e-6), dim=1)
-    log_probs = log_probs_continuous - tanh_correction
+    # # Safer tanh correction term
+    # tanh_correction = torch.sum(torch.log(1 - actions_batch.pow(2) + 1e-6), dim=1)
+    # log_probs = log_probs_continuous - tanh_correction
 
     # Compute advantages with proper normalization
-    advantages = returns_batch - values.detach()
+    # advantages = returns_batch.detach() - values.detach()
     
-    # if advantages.numel() > 1:
-    #     advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+    if advantages_batch.numel() > 1:
+        advantages_batch = (advantages_batch - advantages_batch.mean()) / (advantages_batch.std() + 1e-8)
 
     # Policy loss with proper scaling
-    policy_loss = -(log_probs * advantages).mean() 
-    #print(log_probs)
-    max_action_value = 1.0
-    penalty_weight = 0.1  # Reduced from 10000 to prevent overshadowing other losses
-    action_penalty = penalty_weight * torch.sum(torch.clamp(actions_batch.abs() - (max_action_value - 0.3), min=0) ** 2)
+    policy_loss = -(logprob_batch * advantages_batch).mean() 
+
+    ##penalty_weight = 1e-5 # 
+    # PENELASIZE IF MEANS ARE OUTSIDE OF -1 ;1 
+    ##outbound_loss = penalty_weight* torch.mean((torch.relu(torch.abs(means) - 1)))
 
     # Entropy regularization
-    entropy_loss = -ENTROPY_BETA * (log_stds + 0.5 * math.log(2 * math.pi * math.e)).sum(dim=1).mean()
-    total_policy_loss = policy_loss + entropy_loss + action_penalty
-
-    # Value loss
-    value_loss = nn.functional.mse_loss(values, returns_batch)
-
+    entropy_loss = -ENTROPY_BETA * logprob_batch.mean()
+    
     # L2 regularization (weight decay)
-    l2_lambda = 1e-5
-    l2_policy_loss = sum(torch.sum(param ** 2) for param in policy_net.parameters())
-    l2_value_loss = sum(torch.sum(param ** 2) for param in value_net.parameters())
+    l2_lambda = 1e-6
+    #l2_policy_loss = l2_lambda* sum(torch.sum(param ** 2) for param in policy_net.parameters())
+    #l2_value_loss = l2_lambda* sum(torch.sum(param ** 2) for param in value_net.parameters())
 
-    # Add L2 regularization to the losses
-    total_policy_loss += l2_lambda * l2_policy_loss
-    value_loss += l2_lambda * l2_value_loss
+    total_policy_loss = policy_loss
+    value_loss = nn.functional.mse_loss(values_batch, return_batch)
+
+    # if OUTBOUND_LOSS:
+    #     total_policy_loss += outbound_loss
+    if ENTROPY_LOSS:
+        total_policy_loss += entropy_loss
+    # if WEIGHTS_LOSS_POLICY_NET: 
+    #     total_policy_loss += l2_policy_loss
+    # if WEIGHTS_LOSS_VALUE_NET:
+    #     total_policy_loss += l2_value_loss
+    total_policy_loss += value_loss
 
     LossPolicy.append(total_policy_loss.item())
-    LossValue.append(value_loss.item())
+    LossValue.append(value_loss.item()) # just for logging
     LossEntropy.append(entropy_loss.item())
-    LossOutbound.append(action_penalty.item())
-    LossWeightsPolicy.append(l2_lambda* l2_policy_loss.item())
+    LossOutbound.append(0)
+    LossWeightsPolicy.append(0)
     LossExploration.append(policy_loss.item())
-    LossWeightsValue.append(l2_lambda* l2_value_loss.item())
+    LossWeightsValue.append(0)
 
-    # Backpropagation
-    optimizer_policy.zero_grad()
+    optimizer.zero_grad()
     total_policy_loss.backward()
-    optimizer_policy.step()
+    
+    if CLIP_GRADIENTS_POLICY:
+        torch.nn.utils.clip_grad_norm_(policy_net.parameters(), max_norm=0.5)
+    if CLIP_GRADIENTS_VALUE:
+        torch.nn.utils.clip_grad_norm_(value_net.parameters(), max_norm=0.5)
+    
+    optimizer.step()
 
-    optimizer_value.zero_grad()
-    value_loss.backward()
-    optimizer_value.step()
+def compute_reward(self,is_collision, found_wounded, time_penalty,action):
+        forward = action["forward"]
+        lateral = action["lateral"]
+        rotation = action["rotation"]
 
-def select_action(policy_net, state_map, state_vector):
-    # Debugging and type-checking for state_map
-    if isinstance(state_map, list):
-        state_map = np.array(state_map)
-        #print('Converted state_map to numpy array.')
-    elif isinstance(state_map, torch.Tensor):
-        #print('State_map is already a tensor.')
-        pass
-    #print('State map shape before processing:', state_map.shape)
+        reward = 0
+        reward += self.grid.exploration_score
 
+        # Penalize collisions heavily
+        if is_collision:
+            reward -= 30
+       
+        # Penalize idling or lack of movement
+        reward -= time_penalty
+
+        # give penalty when action are initialy not between -0.9 and 0.9 
+        if (abs(forward) < 0.5 and abs(lateral) < 0.5 and abs(rotation) < 0.5):
+            #print("actions not saturated")
+            pass
+          
+        return reward
+   
+def select_action(actor_critic_net, state_map, state_vector):
+    # S'assurer que les entrées sont des tensors sur le bon device
     if not isinstance(state_map, torch.Tensor):
-        state_map = torch.FloatTensor(state_map)  # Convert to tensor if not already
-    state_map = state_map  # Ensure it's on the correct device
-
-    #print('State map shape after processing:', state_map.shape)
-    #print('State map device:', state_map.device)
-
-    # Debugging and type-checking for state_vector
-    if isinstance(state_vector, list):
-        state_vector = np.array(state_vector)
-        #print('Converted state_vector to numpy array.')
-    elif isinstance(state_vector, torch.Tensor):
-        #print('State_vector is already a tensor.')
-        pass
-    #print('State vector shape before processing:', state_vector.shape)
-
+        state_map = torch.FloatTensor(state_map).to(device)
     if not isinstance(state_vector, torch.Tensor):
-        state_vector = torch.FloatTensor(state_vector)  # Convert to tensor if not already
-    state_vector = state_vector  # Ensure it's on the correct device
-
-    #print('State vector shape after processing:', state_vector.shape)
-    #print('State vector device:', state_vector.device)
-
-    # Policy network forward pass
-    means, log_stds = policy_net(state_map, state_vector)
-
-    # Sample continuous actions
-    stds = torch.exp(log_stds)
-    sampled_continuous_actions = means + torch.randn_like(means) * stds
+        state_vector = torch.FloatTensor(state_vector).to(device)
+    state_vector = state_vector.squeeze().unsqueeze(0)
+    
+    # Appel du réseau : on récupère mu, log_sigma et aussi la valeur (que l'on peut ignorer ici)
+    mu, log_sigma, _ = actor_critic_net(state_map, state_vector)
+    
+    # Calcul de l'action
+    stds = torch.exp(log_sigma)
+    sampled_continuous_actions = mu + torch.randn_like(mu) * stds
     continuous_actions = torch.tanh(sampled_continuous_actions)
-
-    # Compute log probabilities
+    
+    # Calcul du log_prob (avec correction tanh)
     log_probs_continuous = -0.5 * (
-        ((sampled_continuous_actions - means) / (stds + 1e-8)) ** 2 +
-        2 * log_stds + math.log(2 * math.pi)
+        ((sampled_continuous_actions - mu) / (stds + 1e-8)) ** 2 +
+        2 * log_sigma + math.log(2 * math.pi)
     )
     log_probs_continuous = log_probs_continuous.sum(dim=1)
     log_probs_continuous -= torch.sum(torch.log(1 - continuous_actions ** 2 + 1e-6), dim=1)
-
-    # Combine actions
-    action = continuous_actions[0]
     
+    action = continuous_actions[0]
     if torch.isnan(action).any():
         print("NaN detected in action")
         return [0, 0, 0], None
 
-    log_prob = log_probs_continuous
+    return action.detach(), log_probs_continuous
 
-    return action.detach(), log_prob
-
-def train(n_frames_stack=4):
+def train(n_frames_stack=1,n_frame_skip=1,grid_resolution = 8,map_channels = 2):
     
-    print("Training...")
+    PARAMS["map_channels"] = map_channels
+    PARAMS["n_frames_stack"] = n_frames_stack
+    PARAMS["n_frame_skip"] = n_frame_skip
+    PARAMS["grid_resolution"] = grid_resolution
+    print("Training bootstrap")
+    print("Using device:", device)
 
     # Create a unique folder name based on hyperparameters and timestamp
     current_time = time.strftime("%Y%m%d-%H%M%S")
-    folder_name = f"solutions/trained_models/run_lr_{LEARNING_RATE}_episodes_{NB_EPISODES}_{current_time}"
+    folder_name = f"solutions/trained_models/run_{current_time}"
     os.makedirs(folder_name, exist_ok=True)
 
     # Save hyperparameters to a text file
     hyperparams_path = os.path.join(folder_name, "hyperparams.txt")
     with open(hyperparams_path, 'w') as f:
-        f.write(f"LEARNING_RATE = {LEARNING_RATE}\n")
-        f.write(f"ENTROPY_BETA = {ENTROPY_BETA}\n")
-        f.write(f"NB_EPISODES = {NB_EPISODES}\n")
-        f.write(f"MAX_STEPS = {MAX_STEPS}\n")
-        f.write(f"BATCH_SIZE = {BATCH_SIZE}\n")
-        f.write(f"Other hyperparams...\n")
+        # Write hyperparameters from the PARAMS DICT : 
+        for key, value in PARAMS.items():
+            f.write(f"{key}: {value}\n")
 
     map_training = M1()
     playground = map_training.construct_playground(drone_type=MyDroneHulk)
-    print("Using device:", device)
-    policy_net = NetworkPolicy(h=map_training.drones[0].grid.grid.shape[0],w=map_training.drones[0].grid.grid.shape[1],frame_stack=n_frames_stack).to(device)
-    value_net = NetworkValue(h=map_training.drones[0].grid.grid.shape[0],w=map_training.drones[0].grid.grid.shape[1],frame_stack=n_frames_stack).to(device)
 
-    optimizer_policy = optim.Adam(policy_net.parameters(), lr=LEARNING_RATE)
-    optimizer_value = optim.Adam(value_net.parameters(), lr=LEARNING_RATE)
-    policy_net.apply(lambda m: m.reset_parameters() if hasattr(m, 'reset_parameters') else None)
-    value_net.apply(lambda m: m.reset_parameters() if hasattr(m, 'reset_parameters') else None)
+    h_dummy = int(map_training.drones[0].grid.size_area_world[0] / grid_resolution
+                                   + 0.5)
+    w_dummy  = int(map_training.drones[0].grid.size_area_world[1] / grid_resolution
+                                   + 0.5)
 
+    actor_critic_net = ActorCriticNetwork(h=h_dummy, w=w_dummy, frame_stack=n_frames_stack, map_channels=map_channels).to(device)
+    optimizer = optim.Adam(actor_critic_net.parameters(), lr=LEARNING_RATE)
+    actor_critic_net.apply(lambda m: m.reset_parameters() if hasattr(m, 'reset_parameters') else None)
+    
     # Initialize frame buffers
     frame_buffers = {drone: deque(maxlen=n_frames_stack) for drone in map_training.drones}
     global_state_buffer = { drone : deque(maxlen= n_frames_stack) for drone in map_training.drones}
     rewards_per_episode = []
     done = False
-
+    DroneDestroyed = []
     for episode in range(NB_EPISODES):
         playground.reset()
         
         # resetting all needs to be done for each drone
         for drone in map_training.drones:
-            drone.grid.reset()
+            drone.grid = OccupancyGrid(size_area_world=drone.size_area,
+                                resolution=grid_resolution,
+                                lidar=drone.lidar()) # On reset la grille + mettre la bonne resolution.
             
             if drone in frame_buffers: 
                 frame_buffers[drone].clear()
@@ -273,7 +291,8 @@ def train(n_frames_stack=4):
                 frame_buffers[drone] = deque(maxlen=n_frames_stack)
             
             # Initialize with dummy frames
-            dummy_maps = torch.zeros((1, 2,map_training.drones[0].grid.grid.shape[0], map_training.drones[0].grid.grid.shape[1]), device=device)
+
+            dummy_maps = torch.zeros((1, map_channels,map_training.drones[0].grid.grid.shape[0], map_training.drones[0].grid.grid.shape[1]), device=device)
             for _ in range(n_frames_stack):
                 frame_buffers[drone].append(dummy_maps)
 
@@ -291,91 +310,210 @@ def train(n_frames_stack=4):
         # initialisations    
         states_map = []
         states_vector = []
+        next_states_map = []
+        next_states_vector = []
         actions = []
         rewards = []
+        values = []
+        logprobs = []
         step = 0
-        actions_drones = {drone: [0, 0, 0] for drone in map_training.drones}  # Initialize with neutral actions
+        actions_drones = {drone: drone.process_actions([0, 0, 0]) for drone in map_training.drones}  # Initialize with neutral actions
         total_reward = 0
+        done = False
 
 
         while not done and step < MAX_STEPS and all([drone.drone_health>0 for drone in map_training.drones]):
             step += 1
-            
-            for drone in map_training.drones:
-                drone.timestep_count = step
-                #drone.showMaps(display_zoomed_position_grid=True, display_zoomed_grid=True)
-                
-                # Get current frame
-                maps = torch.tensor([drone.grid.grid, drone.grid.position_grid], 
-                                  dtype=torch.float32, device=device).unsqueeze(0)
-                
+            # attendre 70 steps avant de commencer à apprendre (pour que les drones aient une carte un peu remplie) sinon il vont "explorer" 
+            # meme si leur action sont mauvaises
 
-                global_state = drone.process_state_before_network(drone.estimated_pose.position[0],
-                    drone.estimated_pose.position[1],
-                    drone.estimated_pose.orientation,
-                    drone.estimated_pose.vitesse_X,
-                    drone.estimated_pose.vitesse_Y,
-                    drone.estimated_pose.vitesse_angulaire)
-                
-                # Update frame buffer
-                frame_buffers[drone].append(maps)
-                global_state_buffer[drone].append(global_state) # global_state_buffer[drone] = deque([tensor([x,y,...],tensor([..],))]
-                # Stack frames for network input
-                stacked_frames = torch.cat(list(frame_buffers[drone]), dim=1)
-                # Stack global states for network input
-                stacked_global_states = torch.cat(list(global_state_buffer[drone])).unsqueeze(0) # global_states = tensor([x1,y1,..,x2,y2,...) dim = 
-                
-                states_map.append(stacked_frames)
-                states_vector.append(stacked_global_states)
-                
-                #print(f"states vector{type(states_vector)}")
-                # Select action using stacked frames
-                action, _ = select_action(policy_net, stacked_frames, stacked_global_states)
-                # action : tensor([1,-1,1])
-                actions_drones[drone] = drone.process_actions(action)
-                actions.append(action)
+            # WAIT BEFORE TRAINNING
+            if step < 70:
+                if step < 50 : 
+                    i = random.random() # faire tourner le drone pour que le lidar prêne tout
+                else : 
+                    i = 0
+                for drone in map_training.drones:
+                    drone.timestep_count = step
+                    #drone.showMaps(display_zoomed_position_grid=False, display_zoomed_grid=False)
+                    actions_drones = {drone: drone.process_actions([0, 0, i]) for drone in map_training.drones}
+                    drone.update_map_pose_speed()
+                playground.step(actions_drones)
             
-            playground.step(actions_drones)
-            
-            for drone in map_training.drones:
-                
-                drone.update_map_pose_speed() # conséquence de l'action
-                found_wounded = drone.process_semantic_sensor()
-                min_dist = drone.process_lidar_sensor(drone.lidar())
-                is_collision = min_dist < 10
-                reward = drone.compute_reward(is_collision, found_wounded, 1,actions_drones[drone])
-                rewards.append(reward)
-                total_reward += reward
+            # TRAINNING STARTS HERE
+            else : 
+                """
+                Première étape : 
+                - On récupère l'état s (map + global state)
+                - On choisit une action a
+                """   
+             
+                if step % n_frame_skip == 0: # frame skipping
+                    for drone in map_training.drones:
+                        drone.timestep_count = step
+                        #drone.showMaps(display_zoomed_position_grid=True, display_zoomed_grid=True)
+                        
+                        # 2 map channels : grid + position grid
+                        if map_channels ==2 : 
+                            current_maps = torch.from_numpy(np.stack((drone.grid.grid, drone.grid.position_grid),axis=0)).unsqueeze(0)
+                        # 1 map channel : grid
+                        elif map_channels == 1 :
+                            current_maps = torch.from_numpy(drone.grid.grid).unsqueeze(0).unsqueeze(0)
+                        else : 
+                            raise ValueError("map_channels must be 1 or 2")
+                        
+                        current_maps = current_maps.float().to(device)
+                        current_global_state = drone.process_state_before_network(drone.estimated_pose.position[0],
+                            drone.estimated_pose.position[1],
+                            drone.estimated_pose.orientation,
+                            drone.estimated_pose.vitesse_X,
+                            drone.estimated_pose.vitesse_Y,
+                            drone.estimated_pose.vitesse_angulaire).unsqueeze(0)
+                        #with torch.no_grad():
+                            # DEBUGGING SIZE 
+                            #print(f"current maps shape : {current_maps.shape}")
+                        value_current = value_net(current_maps, current_global_state).squeeze() 
+                        
+                        values.append(value_current)
 
-                done = found_wounded
+                        # Update frame buffer
+                        frame_buffers[drone].append(current_maps)
+                        global_state_buffer[drone].append(current_global_state) # global_state_buffer[drone] = deque([tensor([x,y,...],tensor([..],))]
+                        # Stack frames for network input
+                        stacked_frames = torch.cat(list(frame_buffers[drone]), dim=1)
+                        # Stack global states for network input
+                        stacked_global_states = torch.cat(list(global_state_buffer[drone])).unsqueeze(0) # global_states = tensor([x1,y1,..,x2,y2,...) dim = 
+                        
+                        states_map.append(stacked_frames)
+                        states_vector.append(stacked_global_states)
+                        
+                        #print(f"states vector{type(states_vector)}")
+                        # Select action using stacked frames
+                        action, logprob = select_action(policy_net, stacked_frames, stacked_global_states)
+                        # action : tensor([1,-1,1])
+                        actions_drones[drone] = drone.process_actions(action)
+                        actions.append(action)
+                        logprobs.append(logprob)
                 
-                if done:
-                    print("found wounded !")
+                """"
+                Deuxième étape :
+                - On applique l'action sur l'environnement
+                """
 
-            
-            
+                # Si on est dans une skip-frame cela va répéter la dernière action.
+                # Si non cela fait la nouvelle action
+                playground.step(actions_drones) 
+
+                """
+                Troisième étape :
+                - On update l'environnement
+                - On calcule la récompense r
+                """
+                if step % n_frame_skip == 0:
+                    for drone in map_training.drones:
+                        
+                        # ON uptdate la map après l'action
+                        drone.update_map_pose_speed() # conséquence de l'action
+
+                        # # calculate new state s'
+                        # # 2 map channels : grid + position grid
+                        # if map_channels ==2 :
+                        #     next_maps = torch.from_numpy(np.stack((drone.grid.grid, drone.grid.position_grid),axis=0)).unsqueeze(0)
+                        # elif map_channels == 1 :
+                        #     next_maps = torch.from_numpy(drone.grid.grid).unsqueeze(0).unsqueeze(0)
+                        # next_maps = next_maps.float().to(device)
+                        # next_global_state = drone.process_state_before_network(drone.estimated_pose.position[0],
+                        #     drone.estimated_pose.position[1],
+                        #     drone.estimated_pose.orientation,
+                        #     drone.estimated_pose.vitesse_X,
+                        #     drone.estimated_pose.vitesse_Y,
+                        #     drone.estimated_pose.vitesse_angulaire).unsqueeze(0)
+                        
+                        
+                        # with torch.no_grad():
+                        #     value_next = value_net(next_maps, next_global_state).squeeze()
+
+
+                        found_wounded = drone.process_semantic_sensor()
+                        #done = found_wounded
+                        min_dist = drone.process_lidar_sensor(drone.lidar())
+                        is_collision = min_dist < 10
+                        
+                        reward = compute_reward(drone,is_collision, found_wounded, 1,actions_drones[drone])
+                        
+                        # if (step == MAX_STEPS):
+                        #     # compute total exploration score
+                        #     target = np.exp(5 * drone.grid.grid_score / (drone.grid.x_max_grid * drone.grid.y_max_grid))
+                        #     print(f"Exploration score: {target}")
+                        # else:
+                        #     target = reward + GAMMA * value_next
+                        
+                        rewards.append(reward)
+                        total_reward += reward
+                        
+                        if found_wounded:
+                            print("found wounded !")
+
+                else : 
+                    print("Ne devrait pas passer ici")
+                    for drone in map_training.drones:
+                        drone.update_map_pose_speed()
+                
+                # if step % UPDATE_VALUE_NET_PERIOD == 0 : 
+                #     # UPTDATE VALUE NETWORK
+                    
         if any([drone.drone_health<=0 for drone in map_training.drones]):
+            DroneDestroyed.append(1)
             map_training = M1()
             playground = map_training.construct_playground(drone_type=MyDroneHulk)
+        else : 
+            DroneDestroyed.append(0)
         
-        # Optimize the policy and value networks in batches
-        returns = compute_returns(rewards)
+        with torch.no_grad():
+            # Get final value estimate
+            next_state_map = states_map[-1]  
+            next_state_vector = states_vector[-1].squeeze().unsqueeze(0)
+            next_value = value_net(next_state_map, next_state_vector).squeeze()
+
+            # Initialize advantages array
+            advantages = torch.zeros_like(torch.tensor(rewards)).to(device)
+            lastgaelam = 0
+
+            # Compute GAE
+            for t in reversed(range(len(rewards))):
+                if t == len(rewards) - 1:
+                    nextnonterminal = 1.0 - done
+                    nextvalues = next_value
+                else:
+                    nextnonterminal = 1.0 - (t == len(rewards) - 1)  # Only terminal on last step
+                    nextvalues = values[t + 1]
+                    
+                delta = rewards[t] + GAMMA * nextvalues * nextnonterminal - values[t]
+                advantages[t] = lastgaelam = delta + GAMMA * 0.95 * nextnonterminal * lastgaelam
+
+            # Compute returns
+            returns = advantages + torch.tensor(values).to(device)
+                    
+
+        # Train for a number of epochs
+        for epoch in range(NUM_EPOCHS):
+            # Create new dataset and dataloader for each epoch
+            dataset = DroneDataset(actions, returns, advantages,logprobs,values)
+            data_loader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True, generator=generator)
+            
+            for batch in data_loader:
+                actions_b, return_b, advantages_b,logprobs_b,values_b = batch
+                optimize_batch(actions_b, return_b, advantages_b,logprobs_b, values_b,optimizer,policy_net,value_net, device)
+
+        returns = rewards
         rewards_per_episode.append(total_reward)
 
-        dataset = DroneDataset(states_map, states_vector, actions, returns)
-        data_loader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True,generator = generator)
-        for batch in data_loader:
-            states_map_b, states_vector_b, actions_b, returns_b = batch
-            optimize_batch(states_map_b, states_vector_b, actions_b, returns_b, policy_net, value_net, optimizer_policy, optimizer_value, device)
-
-        del states_map,states_vector, actions, rewards
+        del states_map, states_vector, actions, rewards
         
-        if episode % 5 == 1:
-            print(f"Episode {episode}, Reward: {total_reward}, Mean Last 5 Rewards: {np.mean(rewards_per_episode[-5:])}")
-            #torch.save(policy_net.state_dict(), 'solutions/utils/trained_models/policy_net.pth')
-            #torch.save(value_net.state_dict(), 'solutions/utils/trained_models/value_net.pth')
+        if episode % 10 == 1:
+            print(f"Episode {episode}, Reward: {total_reward}, Mean Last 10 Rewards: {np.mean(rewards_per_episode[-10:])}")
             
-        if np.mean(rewards_per_episode[-5:]) > 10000:
+        if np.mean(rewards_per_episode[-10:]) > 10000:
             print(f"Training solved in {episode} episodes!")
             break
     
@@ -385,7 +523,7 @@ def train(n_frames_stack=4):
     with open(losses_csv_path, 'w', newline='') as csv_file:
         csv_writer = csv.writer(csv_file)
         # Header
-        csv_writer.writerow(["Step", "PolicyLoss", "ValueLoss", "EntropyLoss", "OutboundLoss", "WeightsPolicyLoss", "ExplorationLoss"])
+        csv_writer.writerow(["Step", "PolicyLoss", "ValueLoss", "EntropyLoss", "OutboundLoss", "WeightsPolicyLoss","WeightsValueLoss","ExplorationLoss"])
         # Rows
         for i in range(len(LossPolicy)):
             csv_writer.writerow([
@@ -395,6 +533,7 @@ def train(n_frames_stack=4):
                 LossEntropy[i],
                 LossOutbound[i],
                 LossWeightsPolicy[i],
+                LossWeightsValue[i],
                 LossExploration[i],
             ])
 
@@ -403,10 +542,17 @@ def train(n_frames_stack=4):
     with open(rewards_csv_path, 'w', newline='') as csv_file:
         csv_writer = csv.writer(csv_file)
         # Header
-        csv_writer.writerow(["Step", "TotalReward"])
+        csv_writer.writerow(["", "TotalReward"])
         # Rows
         for i, reward in enumerate(rewards_per_episode):
             csv_writer.writerow([i, reward])
+    drone_destroyed_csv_path = os.path.join(folder_name, "drone_destroyed.csv")
+    with open(drone_destroyed_csv_path,"w",newline='') as csv_file:
+        csv_writer = csv.writer(csv_file)
+        csv_writer.writerow(["Step","DroneDestroyed"])
+        for i, drone_destroyed in enumerate(DroneDestroyed):
+            csv_writer.writerow([i,drone_destroyed])
+
     torch.save(policy_net.state_dict(), os.path.join(folder_name,"policy_net.pth"))
     torch.save(value_net.state_dict(), os.path.join(folder_name,"value_net.pth"))    
     print("Training complete. Files saved in:", folder_name)

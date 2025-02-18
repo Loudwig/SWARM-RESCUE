@@ -117,18 +117,10 @@ class MyDroneHulk(DroneAbstract):
         reward = 0
         reward += self.grid.exploration_score
 
-        if reward <= 0 : 
-            reward -= 3
-
         # Penalize collisions heavily
-
         if is_collision:
             reward -= 30
-
-        if found_wounded:
-            reward += 0
-        
-
+       
         # Penalize idling or lack of movement
         reward -= time_penalty
 
