@@ -35,7 +35,7 @@ torch.set_default_device(device)
 generator = torch.Generator(device=device)
 
 GAMMA = 0.99             # Discount factor
-LEARNING_RATE = 1e-4
+LEARNING_RATE = 5e-5
 ENTROPY_BETA = 1e-3
 NB_EPISODES = 500
 MAX_STEPS = 64*2 + 69    # en lien avec la taille du batch
@@ -56,6 +56,14 @@ LossOutbound = []
 LossWeightsValue = []
 LossExploration = []
 LossWeightsPolicy = []
+
+# DEBUG 
+DebugActionMean = []
+DebugValueMean = []
+DebugStdsMean = []
+DebugMaxGradMean = []
+
+
 
 # =============================================================================
 # Définition du réseau Actor-Critic (partie CNN commune et deux têtes)
@@ -234,13 +242,20 @@ def optimize_batch(states_map_b, states_vector_b, actions_b, return_b, advantage
     
     optimizer.zero_grad()
     total_loss.backward()
-    torch.nn.utils.clip_grad_norm_(actor_critic_net.parameters(), max_norm=0.5)
+    max_grad = 0.0
+    for name, param in actor_critic_net.named_parameters():
+        if param.grad is not None:
+            grad_norm = param.grad.data.norm(2).item()
+            if grad_norm > max_grad:
+                max_grad = grad_norm
+    torch.nn.utils.clip_grad_norm_(actor_critic_net.parameters(), max_norm=10)
+
     optimizer.step()
     
     LossPolicy.append(total_loss.item())
     LossValue.append(value_loss.item())
     LossEntropy.append(entropy_loss.item())
-
+    return max_grad,mu.detach(),stds.detach(),values_pred.detach()
 # =============================================================================
 # Fonction de calcul de la récompense
 # =============================================================================
@@ -435,15 +450,33 @@ def train(n_frames_stack=1, n_frame_skip=1, grid_resolution=8, map_channels=2):
             delta = rewards[t] + GAMMA * nextvalues * nextnonterminal - values[t]
             advantages[t] = lastgaelam = delta + GAMMA * 0.95 * nextnonterminal * lastgaelam
         returns = advantages + torch.tensor(values, device=device)
-        
+        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8) 
         # Optimisation sur plusieurs epochs
+        MaxGradNormEp = []
+        DebugActionMeanEp = []
+        DebugStdsEp = []
+        DebugValueEp = []
         for epoch in range(NUM_EPOCHS):
             dataset = DroneDataset(states_map, states_vector, actions, returns, advantages, logprobs, values)
             data_loader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True, generator=generator)
             for batch in data_loader:
                 states_map_b, states_vector_b, actions_b, return_b, advantages_b, logprobs_b, values_b = batch
-                optimize_batch(states_map_b, states_vector_b, actions_b, return_b, advantages_b, logprobs_b, values_b, optimizer, actor_critic_net, device)
+                max_grad,mu,stds,valueloging = optimize_batch(states_map_b, states_vector_b, actions_b, return_b, advantages_b, logprobs_b, values_b, optimizer, actor_critic_net, device)
+                MaxGradNormEp.append(max_grad)
+                DebugActionMeanEp.append(mu)
+                DebugStdsEp.append(stds)
+                DebugValueEp.append(valueloging)
         
+        #print(f"MAX GRAD MEAN FOR EPPISODE : {np.mean(MaxGradNormEp)}")
+        #print(f"ACTION MEAN MEAN FOR EPPISODE : {np.mean(DebugActionMeanEp)}")
+        #print(f"STDS MEAN FOR EPPISODE : {np.mean(DebugStdsEp)}")
+        #print(f"VALUE PRED MEAN FOR EPPISODE : {np.mean(DebugValueEp)}")
+        
+        DebugActionMean.append(np.mean(DebugActionMeanEp))
+        DebugValueMean.append(np.mean(DebugValueEp))
+        DebugStdsMean.append(np.mean(DebugStdsEp))
+        DebugMaxGradMean.append(np.mean(MaxGradNormEp))
+
         rewards_per_episode.append(total_reward)
         del states_map, states_vector, actions, rewards
         
@@ -469,11 +502,23 @@ def train(n_frames_stack=1, n_frame_skip=1, grid_resolution=8, map_channels=2):
                 LossWeightsValue[i] if LossWeightsValue else 0,
                 LossExploration[i] if LossExploration else 0,
             ])
-    
+    debug_csv_path = os.path.join(folder_name, "debug.csv")
+    with open(losses_csv_path, 'w', newline='') as csv_file:
+        csv_writer = csv.writer(csv_file)
+        csv_writer.writerow(["Step", "ActionMean", "StdsMean", "MaxGradMean", "ValueMean"])
+        for i in range(len(LossPolicy)):
+            csv_writer.writerow([
+                i,
+                DebugActionMean[i],
+                DebugStdsMean[i],
+                DebugMaxGradMean[i],
+                DebugValueMean[i]
+            ])
+
     rewards_csv_path = os.path.join(folder_name, "rewards_per_episode.csv")
     with open(rewards_csv_path, 'w', newline='') as csv_file:
         csv_writer = csv.writer(csv_file)
-        csv_writer.writerow(["", "TotalReward"])
+        csv_writer.writerow(["Step", "TotalReward"])
         for i, reward in enumerate(rewards_per_episode):
             csv_writer.writerow([i, reward])
     
