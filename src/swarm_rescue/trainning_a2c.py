@@ -472,10 +472,10 @@ def train(n_frames_stack=1, n_frame_skip=1, grid_resolution=8, map_channels=2):
         #print(f"STDS MEAN FOR EPPISODE : {np.mean(DebugStdsEp)}")
         #print(f"VALUE PRED MEAN FOR EPPISODE : {np.mean(DebugValueEp)}")
         
-        DebugActionMean.append(np.mean(DebugActionMeanEp))
-        DebugValueMean.append(np.mean(DebugValueEp))
-        DebugStdsMean.append(np.mean(DebugStdsEp))
-        DebugMaxGradMean.append(np.mean(MaxGradNormEp))
+        DebugActionMean.append(np.mean(DebugActionMeanEp.cpu().numpy()))
+        DebugValueMean.append(np.mean(DebugValueEp.cpu().numpy()))
+        DebugStdsMean.append(np.mean(DebugStdsEp.cpu().numpy()))
+        DebugMaxGradMean.append(np.mean(MaxGradNormEp.cpu().numpy()))
 
         rewards_per_episode.append(total_reward)
         del states_map, states_vector, actions, rewards
