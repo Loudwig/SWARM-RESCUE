@@ -13,6 +13,7 @@ from solutions.utils.dataclasses_config import *
 
 
 
+
 class OccupancyGrid(Grid):
     """Self updating occupancy grid"""
 
@@ -79,6 +80,9 @@ class OccupancyGrid(Grid):
         self.frontier_connectivity_structure = np.ones((3, 3), dtype=int)  # Connects points that are adjacent (even diagonally)
         self.frontiers = []
 
+        # Track frontiers that are unreachable
+        self.unreachable_frontiers = set()  # store e.g. centroid as a tuple
+
     def set_initial_cell(self, world_x, world_y):
         """
         Store the cell that corresponds to the initial drone position 
@@ -105,9 +109,9 @@ class OccupancyGrid(Grid):
         filtered = cv2.medianBlur(copy,3,)
         seuil = 2
         median_map[filtered > seuil] = self.OBSTACLE
-        median_map[abs(filtered) <= 0] = self.UNDISCOVERED 
+        median_map[abs(filtered) <= 0] = self.UNDISCOVERED
         return median_map
-        
+
 
 
 
@@ -126,7 +130,7 @@ class OccupancyGrid(Grid):
         binary_map[self.grid > 2] = self.OBSTACLE
         binary_map[abs(self.grid) <= 2] = self.UNDISCOVERED
         return binary_map
-    
+
     def to_update(self, pose: Pose):
         """
         Returns the list of things to update on the grid
@@ -141,7 +145,7 @@ class OccupancyGrid(Grid):
 
         lidar_dist = self.lidar.get_sensor_values()[::EVERY_N].copy()
         lidar_angles = self.lidar.ray_angles[::EVERY_N].copy()
-        
+
 
         # Compute cos and sin of the absolute angle of the lidar
         cos_rays = np.cos(lidar_angles + pose.orientation)
@@ -169,21 +173,21 @@ class OccupancyGrid(Grid):
                             )
 
         # For obstacle zones, all values of lidar_dist are < max_range
-        select_collision = lidar_dist < max_range 
-        
+        select_collision = lidar_dist < max_range
+
         points_x = pose.position[0] + np.multiply(lidar_dist, cos_rays)
         points_y = pose.position[1] + np.multiply(lidar_dist, sin_rays)
-        
-        if MappingParams().TryNotCountingDroneAsObstacle: 
+
+        if MappingParams().TryNotCountingDroneAsObstacle:
                 # print(len(select_collision))
                 zone_drone_x , zone_drone_y = self.compute_near_drones_zone(pose)
                 epsilon = 3
                 for ind,v in enumerate(select_collision):
                     if select_collision[ind] == True:
-                        if self.List_any_comparaison_int(abs(zone_drone_x - points_x[ind]),epsilon) and self.List_any_comparaison_int(abs(zone_drone_y - points_y[ind]),epsilon): 
+                        if self.List_any_comparaison_int(abs(zone_drone_x - points_x[ind]),epsilon) and self.List_any_comparaison_int(abs(zone_drone_y - points_y[ind]),epsilon):
                             # print("NEAR ZONE DRONE")
                             select_collision[ind] =  False
-        
+
         points_x = points_x[select_collision]
         points_y = points_y[select_collision]
 
@@ -217,6 +221,7 @@ class OccupancyGrid(Grid):
             if not isinstance(message, DroneMessage):
                 raise ValueError("Invalid message type. Expected a DroneMessage instance.")
             if message.code == DroneMessage.Code.BROADCAST:
+                # Skip broadcast in the mapping update
                 continue
 
             code = message.code
@@ -248,6 +253,9 @@ class OccupancyGrid(Grid):
                                       interpolation=cv2.INTER_NEAREST)
     
     def frontiers_update(self):
+        """
+        Update self.frontiers by detecting boundaries between FREE and UNDISCOVERED.
+        """
         ternary_map = self.to_ternary_map()
 
         # Différences sur les axes X et Y
@@ -265,40 +273,55 @@ class OccupancyGrid(Grid):
 
         # Extraction des points de chaque frontière
         frontiers = [np.argwhere(labeled_array == i) for i in range(1, num_features + 1)]
-        self.frontiers = [self.Frontier(cells) for cells in frontiers if len(cells) >= self.Frontier.MIN_FRONTIER_SIZE]
-    
+        self.frontiers = [
+            self.Frontier(cells) for cells in frontiers
+            if len(cells) >= self.Frontier.MIN_FRONTIER_SIZE
+        ]
+
     def closest_largest_centroid_frontier(self, pose: Pose):
         """
-        Returns the centroid of the frontier with best interest considering both distance to pose and size.
-        IN GRID COORDINATES.
+        Returns the centroid (in grid coordinates) of the "best" frontier
+        considering both distance to the drone and frontier size.
+        Skips frontiers that are previously marked unreachable.
         """
         self.frontiers_update()
         if not self.frontiers:
             return None
 
         pos_drone_grid = np.array(self._conv_world_to_grid(*pose.position))
-        centroids_with_size = [
-            (frontier.compute_centroid(), frontier.size()) for frontier in self.frontiers
-        ]
-        
+        centroids_with_size = []
+        for frontier in self.frontiers:
+            centroid = frontier.compute_centroid()
+            if centroid is None:
+                continue
+            # If the centroid is in unreachable_frontiers, skip it
+            c_tuple = (int(centroid[0]), int(centroid[1]))
+            if c_tuple in self.unreachable_frontiers:
+                continue
+            centroids_with_size.append((centroid, frontier.size()))
+
+        if not centroids_with_size:
+            return None
+
         def interest_measure(frontier_data):
             centroid, size = frontier_data
             distance = np.linalg.norm(centroid - pos_drone_grid)
-            return distance / (size + 1)**2
-        
+            return distance / (size + 1) ** 2
+
         closest_centroid, _ = min(centroids_with_size, key=interest_measure, default=(None, None))
         return closest_centroid
 
     def compute_safest_path(self, start_cell, target_cell, max_inflation):
         """
-        Returns the path, if it exists, that joins drone's position to target_cell
-        while approaching the least possible any wall
-        start_cell, target_cell : GRID COORDINATES
+        Returns the path (list of world coordinates) if it exists, or None if no path is found.
+        We'll also mark the target_cell as unreachable if we fail to find a path.
         """
         MAP = self.to_ternary_map()
+        path_found = None
 
-        for inflation in range(max_inflation, 0, -1):   # Decreasing inflation to find the safest path
+        for inflation in range(max_inflation, 0, -1):
             MAP_inflated = inflate_obstacles(MAP, inflation)
+            # Try to find a free start and end near start_cell / target_cell
             start_x, start_y = next_point_free(MAP_inflated, *start_cell, max_inflation - inflation + 3)
             end_x, end_y = next_point_free(MAP_inflated, *target_cell, max_inflation - inflation + 3)
 
@@ -306,15 +329,26 @@ class OccupancyGrid(Grid):
 
             if path:
                 path_simplified = self.simplify_path(path, MAP_inflated) or [start_cell]
-                return [self._conv_grid_to_world(x, y) for x, y in path_simplified]
-        
-        return [self._conv_grid_to_world(*start_cell)]*2
+                path_found = [self._conv_grid_to_world(x, y) for x, y in path_simplified]
+                break
+
+        if not path_found:
+            # Mark the frontier's centroid as unreachable
+            self.mark_unreachable_frontier(target_cell)
+            return None
+        return path_found
+
+    def mark_unreachable_frontier(self, cell):
+        """
+        Mark the given cell as unreachable so we skip it next time.
+        """
+        self.unreachable_frontiers.add((int(cell[0]), int(cell[1])))
 
     def simplify_path(self, path, MAP):
         path_simplified = simplify_collinear_points(path)
         path_line_of_sight = simplify_by_line_of_sight(path_simplified, MAP)
         return ramer_douglas_peucker(path_line_of_sight, 0.5)
-    
+
     def compute_near_drones_zone(self,pose:Pose):
         detection_semantic = self.semantic.get_sensor_values().copy()
         zone_drone_x = []
@@ -323,12 +357,12 @@ class OccupancyGrid(Grid):
             if (data.entity_type == DroneSemanticSensor.TypeEntity.DRONE):
                 cos_rays = np.cos(data.angle + pose.orientation)
                 sin_rays = np.sin(data.angle + pose.orientation)
-                
+
                 zone_drone_x.append(pose.position[0] + np.multiply(data.distance, cos_rays))
                 zone_drone_y.append(pose.position[1] + np.multiply(data.distance, sin_rays))
         return zone_drone_x,zone_drone_y
-    
+
     def List_any_comparaison_int(self,L,i):
-        for x in L : 
+        for x in L :
             if x < i : return True
         return False

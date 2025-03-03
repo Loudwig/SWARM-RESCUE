@@ -119,7 +119,7 @@ class MyDroneFrontex(DroneAbstract):
         if self.timestep_count<=1 or inKillZone:
             return None
         message = self.grid.to_update(pose=self.estimated_pose)
-        if self.state == self.State.GRASPING_WOUNDED or self.state == self.State.SEARCHING_RESCUE_CENTER:
+        if self.state == self.State.GRASPING_WOUNDED or self.state == self.State.SEARCHING_RESCUE_CENTER or self.state == self.State.GOING_RESCUE_CENTER:
             broadcast_msg = DroneMessage(
                 subject=DroneMessage.Subject.MAPPING,
                 code=DroneMessage.Code.BROADCAST,
@@ -202,6 +202,10 @@ class MyDroneFrontex(DroneAbstract):
         target_cell = self.grid.initial_cell
         max_inflation = self.path_params.max_inflation_obstacle
         self.path = self.grid.compute_safest_path(start_cell, target_cell, max_inflation)
+        if self.path is None:
+            # This frontier is unreachable, skip it
+            self.finished_path = True
+            return {"forward": 0.0, "lateral": 0.0, "rotation": 0.0, "grasper": 0}
         self.indice_current_waypoint = 0
 
     def handle_going_rescue_center(self, epsilon_rescue_center, is_near_rescue_center):
@@ -240,19 +244,21 @@ class MyDroneFrontex(DroneAbstract):
     def handle_unknown_state(self):
         raise ValueError("State not found")
 
-    def check_near_rescuing_drone(self, threshold):
+    def check_near_rescuing_drone(self, threshold, messages=None):
         """
         Checks if any received broadcast message indicates a drone (other than self)
         is grasping a wounded and is closer than the given threshold.
         """
-        if self.communicator:
-            for raw_msg in self.communicator.received_messages:
-                if isinstance(raw_msg, DroneMessage) and raw_msg.code == DroneMessage.Code.BROADCAST:
-                    broadcast_id, broadcast_loc = raw_msg.arg
-                    if broadcast_id != self.identifier:
-                        distance = np.linalg.norm(np.array(self.estimated_pose.position) - np.array(broadcast_loc))
-                        if distance < threshold:
-                            return True
+        if messages is None:
+            messages = self.communicator.received_messages if self.communicator else []
+
+        for raw_msg in messages:
+            if isinstance(raw_msg, DroneMessage) and raw_msg.code == DroneMessage.Code.BROADCAST:
+                broadcast_id, broadcast_loc = raw_msg.arg
+                #if broadcast_id != self.identifier:
+                distance = np.linalg.norm(np.array(self.estimated_pose.position) - np.array(broadcast_loc))
+                if distance < threshold:
+                    return True
         return False
 
     def process_semantic_sensor(self):
@@ -294,7 +300,7 @@ class MyDroneFrontex(DroneAbstract):
                     if raw_msg.code != DroneMessage.Code.BROADCAST:
                         continue
                     broadcast_loc = np.array(raw_msg.arg[1])
-                    if np.linalg.norm(detection_position - broadcast_loc) < 20.0:  # adjust threshold as needed
+                    if np.linalg.norm(detection_position - broadcast_loc) < 30.0:  # adjust threshold as needed
                         conflict = True
                         break
                 if not conflict:
@@ -377,6 +383,11 @@ class MyDroneFrontex(DroneAbstract):
         return False
 
     def follow_path(self,path):
+        if path is None or len(path) == 0:
+            # No path to follow
+            self.finished_path = True
+            return {"forward": 0.0, "lateral": 0.0, "rotation": 0.0, "grasper": 0}
+
         if self.is_near_waypoint(path[self.indice_current_waypoint]):
             self.indice_current_waypoint += 1 # next point in path
             #print(f"Waypoint reached {self.indice_current_waypoint}")
@@ -386,7 +397,7 @@ class MyDroneFrontex(DroneAbstract):
                 self.path = []
                 self.path_grid = []
                 return
-        
+
         return self.go_to_waypoint(path[self.indice_current_waypoint][0],path[self.indice_current_waypoint][1])
 
     def go_to_waypoint(self,x,y):
@@ -445,11 +456,9 @@ class MyDroneFrontex(DroneAbstract):
             self.State.SEARCHING_RESCUE_CENTER: {
                 "lost_rescue_center": self.State.WAITING,
                 "found_rescue_center": self.State.GOING_RESCUE_CENTER,
-                "is_near_rescuing_drone": self.State.WAITING
             },
             self.State.GOING_RESCUE_CENTER: {
                 "lost_rescue_center": self.State.WAITING,
-                "is_near_rescuing_drone": self.State.WAITING
             },
             self.State.EXPLORING_FRONTIERS: {
                 "found_wounded": self.State.GRASPING_WOUNDED,
@@ -547,6 +556,8 @@ class MyDroneFrontex(DroneAbstract):
         arcade.draw_circle_filled(point[0], point[1], 5, arcade.color.GO_GREEN)
 
     def draw_path(self, path):
+        if path is None or len(path) == 0:
+            return  # Nothing to draw.
         length = len(path)
         pt2 = None
         for ind_pt in range(length):
