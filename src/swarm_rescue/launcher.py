@@ -86,6 +86,7 @@ class Launcher:
         # eval_config = EvalConfig(map_type=MyMapMedium01, zones_config=zones_config, nb_rounds=1, config_weight=1)
         # self.eval_plan.add(eval_config=eval_config)
 
+        # zones_config: ZonesConfig = (ZoneType.NO_COM_ZONE, ZoneType.NO_GPS_ZONE, ZoneType.KILL_ZONE)
         # eval_config = EvalConfig(map_type=MyMapMedium01, zones_config=zones_config, nb_rounds=1, config_weight=1)
         # self.eval_plan.add(eval_config=eval_config)
 

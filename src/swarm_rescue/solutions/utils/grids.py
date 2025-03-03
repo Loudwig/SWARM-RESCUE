@@ -216,6 +216,8 @@ class OccupancyGrid(Grid):
             # Ensure the message is a valid DroneMessage instance
             if not isinstance(message, DroneMessage):
                 raise ValueError("Invalid message type. Expected a DroneMessage instance.")
+            if message.code == DroneMessage.Code.BROADCAST:
+                continue
 
             code = message.code
             arg = message.arg

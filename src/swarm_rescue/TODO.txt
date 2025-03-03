@@ -1,0 +1,3 @@
+A faire: être sûr de ne pas avoir plusieurs drones sur un même blessé
+Solutions possibles: - checker si il est pas grasped avant de continuer à aller vers lui. Problème: pas de détection en amont, seulement au dernier moment
+                     - communication entre les drones pour 
