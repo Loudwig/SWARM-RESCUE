@@ -140,8 +140,9 @@ class MyDroneFrontex(DroneAbstract):
             # Retrieve Sensor Data
             found_wall, epsilon_wall_angle, min_dist = self.process_lidar_sensor(self.lidar())
             found_wounded, found_rescue_center, epsilon_wounded, epsilon_rescue_center, is_near_rescue_center = self.process_semantic_sensor()
-
-            is_near_rescuing_drone = self.check_near_rescuing_drone(threshold=20.0) # check if it does not hamper rescue of broadcasting grasping drone
+            is_near_rescuing_drone = self.check_near_rescuing_drone(threshold=30.0)
+            if is_near_rescuing_drone:
+                print("Hampering a rescue, waiting...")
 
             # TRANSITIONS OF THE STATE
             self.state_update(found_wall, found_wounded, found_rescue_center, is_near_rescuing_drone)
@@ -250,15 +251,17 @@ class MyDroneFrontex(DroneAbstract):
         is grasping a wounded and is closer than the given threshold.
         """
         if messages is None:
-            messages = self.communicator.received_messages if self.communicator else []
+            messages = [msg[1] for msg in self.communicator.received_messages] if self.communicator else []
 
-        for raw_msg in messages:
+        if not (messages and messages[0]):
+            return False
+        for raw_msg in messages[0]:
             if isinstance(raw_msg, DroneMessage) and raw_msg.code == DroneMessage.Code.BROADCAST:
                 broadcast_id, broadcast_loc = raw_msg.arg
-                #if broadcast_id != self.identifier:
-                distance = np.linalg.norm(np.array(self.estimated_pose.position) - np.array(broadcast_loc))
-                if distance < threshold:
-                    return True
+                if broadcast_id != self.identifier:
+                    distance = np.linalg.norm(np.array(self.estimated_pose.position) - np.array(broadcast_loc))
+                    if distance < threshold:
+                        return True
         return False
 
     def process_semantic_sensor(self):
@@ -294,15 +297,20 @@ class MyDroneFrontex(DroneAbstract):
                 dy = score[2] * math.sin(score[1] + self.estimated_pose.orientation)
                 detection_position = np.array(self.estimated_pose.position) + np.array([dx, dy])
                 conflict = False
-                for raw_msg in self.communicator.received_messages:
-                    if not isinstance(raw_msg, DroneMessage):
-                        continue
-                    if raw_msg.code != DroneMessage.Code.BROADCAST:
-                        continue
-                    broadcast_loc = np.array(raw_msg.arg[1])
-                    if np.linalg.norm(detection_position - broadcast_loc) < 30.0:  # adjust threshold as needed
-                        conflict = True
-                        break
+                raw_msg = [msg[1] for msg in self.communicator.received_messages]
+                if not (raw_msg and raw_msg[0]):
+                    continue
+                for drone_msg in raw_msg:
+                    for raw_msg in drone_msg:
+                        if not isinstance(raw_msg, DroneMessage):
+                            continue
+                        if raw_msg.code != DroneMessage.Code.BROADCAST:
+                            continue
+                        broadcast_loc = np.array(raw_msg.arg[1])
+                        if np.linalg.norm(detection_position - broadcast_loc) < 20.0:  # adjust threshold as needed
+                            conflict = True
+                            print("Conflict of wounded")
+                            break
                 if not conflict:
                     filtered_scores.append(score)
         else:
@@ -503,10 +511,14 @@ class MyDroneFrontex(DroneAbstract):
         
         grid_update_informations = self.grid.to_update(pose=self.estimated_pose)
         if self.communicator:
-            received_messages = self.communicator.received_messages
-            for msg in received_messages:
-                message = msg[1]
-                grid_update_informations += message
+            received_messages = [msg[1] for msg in self.communicator.received_messages]
+            for drone_msg in received_messages:
+                for msg in drone_msg:
+                    if not isinstance(msg, DroneMessage):
+                        continue
+                    if msg.code != DroneMessage.Code.LINE or msg.code != DroneMessage.Code.POINTS:
+                        continue
+                    grid_update_informations += msg
         self.grid.update(grid_update_informations)
         
         if display and (self.timestep_count % 5 == 0):
