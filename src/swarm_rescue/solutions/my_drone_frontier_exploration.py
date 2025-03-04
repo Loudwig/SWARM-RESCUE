@@ -56,7 +56,7 @@ class MyDroneFrontex(DroneAbstract):
         self.estimated_pose = Pose()
         self.grid = OccupancyGrid(size_area_world=self.size_area,
                                   resolution=self.mapping_params.resolution,
-                                  lidar=self.lidar())
+                                  lidar=self.lidar(),semantic=self.semantic())
 
         # POSITION
         self.previous_position = deque(maxlen=1) 
