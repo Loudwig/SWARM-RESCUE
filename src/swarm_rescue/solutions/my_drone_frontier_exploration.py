@@ -196,7 +196,7 @@ class MyDroneFrontex(DroneAbstract):
     def handle_searching_rescue_center(self):
         if self.previous_state is not self.State.SEARCHING_RESCUE_CENTER:
             self.plan_path_to_rescue_center()
-        return self.follow_path(self.path)
+        return self.follow_path(self.path,found_wounded=True)
 
     def plan_path_to_rescue_center(self):
         start_cell = self.grid._conv_world_to_grid(*self.estimated_pose.position)
@@ -228,7 +228,7 @@ class MyDroneFrontex(DroneAbstract):
         if self.explored_all_frontiers:
             return self.handle_waiting()
         else:
-            return self.follow_path(self.path)
+            return self.follow_path(self.path,found_wounded=False)
 
     def plan_path_to_frontier(self):
         self.next_frontier = self.grid.closest_largest_centroid_frontier(self.estimated_pose)
@@ -390,7 +390,7 @@ class MyDroneFrontex(DroneAbstract):
             return True
         return False
 
-    def follow_path(self,path):
+    def follow_path(self,path,found_wounded):
         if path is None or len(path) == 0:
             # No path to follow
             self.finished_path = True
@@ -406,16 +406,16 @@ class MyDroneFrontex(DroneAbstract):
                 self.path_grid = []
                 return
 
-        return self.go_to_waypoint(path[self.indice_current_waypoint][0],path[self.indice_current_waypoint][1])
+        return self.go_to_waypoint(path[self.indice_current_waypoint][0],path[self.indice_current_waypoint][1],found_wounded)
 
-    def go_to_waypoint(self,x,y):
+    def go_to_waypoint(self,x,y,found_wounded):
 
         # ASSERVISSEMENT EN ANGLE
         dx = x - self.estimated_pose.position[0]
         dy = y - self.estimated_pose.position[1]
         epsilon = math.atan2(dy,dx) - self.estimated_pose.orientation
         epsilon = normalize_angle(epsilon)
-        command_path = self.pid_controller({"forward": 1,"lateral": 0.0,"rotation": 0.0,"grasper": 1},epsilon,self.pid_params.Kp_angle_1,self.pid_params.Kd_angle_1,self.pid_params.Ki_angle,self.past_ten_errors_angle,"rotation",0.5)
+        command_path = self.pid_controller({"forward": 1,"lateral": 0.0,"rotation": 0.0,"grasper": 1 if found_wounded else 0},epsilon,self.pid_params.Kp_angle_1,self.pid_params.Kd_angle_1,self.pid_params.Ki_angle,self.past_ten_errors_angle,"rotation",0.5)
 
         # ASSERVISSEMENT LATERAL
         if self.indice_current_waypoint == 0:
