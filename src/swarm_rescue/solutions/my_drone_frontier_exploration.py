@@ -519,6 +519,11 @@ class MyDroneFrontex(DroneAbstract):
                                  float(pt1[1]), [125,125,125])
             pt2 = pt1
 
+    def draw_boxes(self):
+        for box_edges in self.grid.boxes_egdes:
+            for point in box_edges:
+                self.draw_point(self.grid._conv_grid_to_world(*point) + self._half_size_array, color=arcade.color.RED)
+
     def draw_top_layer(self):
         if self.visualisation_params.draw_path:
             self.draw_path(self.path)
@@ -530,6 +535,9 @@ class MyDroneFrontex(DroneAbstract):
             if self.visualisation_params.draw_frontier_points and self.next_frontier is not None:
                 for point in self.next_frontier.cells:
                     self.draw_point(self.grid._conv_grid_to_world(*point) + self._half_size_array, color=arcade.color.AIR_FORCE_BLUE)     # frame of reference change
+            
+        if self.visualisation_params.draw_box_points:
+            self.draw_boxes()
 
     def visualise_actions(self):
         """

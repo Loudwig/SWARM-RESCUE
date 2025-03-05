@@ -60,6 +60,7 @@ class VisualisationParams:
     draw_path: bool = True
     draw_frontier_centroid: bool = True
     draw_frontier_points: bool = True
+    draw_box_points:bool = True
 
 @dataclass  # Relative to grids.py
 class GridParams:
@@ -85,6 +86,11 @@ class GridParams:
     FREE_THRESHOLD: float = 0
     OBSTACLE_THRESHOLD: float = 0
 
+    MIN_BOX_SIDE_SIZE: int = 5  # Absolute size
+    MAX_BOX_SIDE_SIZE_FACTOR: float = 0.5  # Relative to the grid size
+    PROCESSING_INTERVAL = 30
+
 @dataclass
 class BehaviourParams:
     try_not_couting_drone_as_obstacle: bool = True
+    process_grid: bool = True

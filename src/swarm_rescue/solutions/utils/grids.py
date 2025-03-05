@@ -78,6 +78,10 @@ class OccupancyGrid(Grid):
         self.frontier_connectivity_structure = np.ones((3, 3), dtype=int)  # Connects points that are adjacent (even diagonally)
         self.frontiers = []
 
+        self.boxes_egdes = set()
+
+        self.process_counter = 0
+
     def set_initial_cell(self, world_x, world_y):
         """
         Store the cell that corresponds to the initial drone position 
@@ -223,6 +227,12 @@ class OccupancyGrid(Grid):
             else:
                 raise ValueError(f"Unknown code in DroneMessage: {code}")
 
+        if self.process_grid:
+            self.process_counter += 1
+            if self.process_counter == GridParams.PROCESSING_INTERVAL:
+                self.process_grid()
+                self.process_counter = 0
+
         # Threshold values in the grid
         self.grid = np.clip(self.grid, THRESHOLD_MIN, THRESHOLD_MAX)
 
@@ -260,6 +270,27 @@ class OccupancyGrid(Grid):
         # Extraction des points de chaque frontière
         frontiers = [np.argwhere(labeled_array == i) for i in range(1, num_features + 1)]
         self.frontiers = [self.Frontier(cells) for cells in frontiers if len(cells) >= self.Frontier.MIN_FRONTIER_SIZE]
+    
+    def detect_and_fill_boxes(self):
+        ternary_map = self.to_ternary_map()
+        obstacle_mask = (ternary_map == self.OBSTACLE).astype(np.uint8) * 255
+
+        contours, _ = cv2.findContours(obstacle_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        for contour in contours:
+            x, y, w, h = cv2.boundingRect(contour)
+
+            # Ensure it's large enough
+            if min(w, h) >= GridParams.MIN_BOX_SIDE_SIZE:
+                # Ensure it's not the whole map rectangle
+                if max(w, h) <= self.x_max_grid * GridParams.MAX_BOX_SIDE_SIZE_FACTOR:
+                    self.boxes_egdes.update({(x, y), (x + w, y), (x, y + h), (x + w, y + h)})
+                    self.grid[y:y+h, x:x+w] = GridParams.THRESHOLD_MAX
+
+    def process_grid(self):
+        if self.process_counter == GridParams.PROCESSING_INTERVAL:
+            self.detect_and_fill_boxes()
+            self.process_counter = 0
 
     def delete_frontier_artifacts(self, frontier):
         """
