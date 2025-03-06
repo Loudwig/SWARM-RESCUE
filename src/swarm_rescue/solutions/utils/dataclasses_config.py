@@ -88,7 +88,7 @@ class GridParams:
 
     MIN_BOX_SIDE_SIZE: int = 5  # Absolute size
     MAX_BOX_SIDE_SIZE_FACTOR: float = 0.5  # Relative to the grid size
-    PROCESSING_INTERVAL = 30
+    PROCESSING_INTERVAL = 120
 
 @dataclass
 class BehaviourParams:

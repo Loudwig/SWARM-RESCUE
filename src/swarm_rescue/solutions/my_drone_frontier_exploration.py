@@ -520,9 +520,8 @@ class MyDroneFrontex(DroneAbstract):
             pt2 = pt1
 
     def draw_boxes(self):
-        for box_edges in self.grid.boxes_egdes:
-            for point in box_edges:
-                self.draw_point(self.grid._conv_grid_to_world(*point) + self._half_size_array, color=arcade.color.RED)
+        for box_edge in self.grid.boxes_edges:
+            self.draw_point(self.grid._conv_grid_to_world(*box_edge) + self._half_size_array, color=arcade.color.RED)
 
     def draw_top_layer(self):
         if self.visualisation_params.draw_path:

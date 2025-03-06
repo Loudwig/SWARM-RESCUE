@@ -78,7 +78,7 @@ class OccupancyGrid(Grid):
         self.frontier_connectivity_structure = np.ones((3, 3), dtype=int)  # Connects points that are adjacent (even diagonally)
         self.frontiers = []
 
-        self.boxes_egdes = set()
+        self.boxes_edges = set()
 
         self.process_counter = 0
 
@@ -282,23 +282,22 @@ class OccupancyGrid(Grid):
         contours, _ = cv2.findContours(obstacle_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
         for contour in contours:
-            # Approximate the contour to a polygon
-            epsilon = 10 * cv2.arcLength(contour, True)  # Adjust epsilon for more/less precision
-            approx = cv2.approxPolyDP(contour, epsilon, True)
-            
-            # Check if the polygon has 4 vertices (rectangle)
-            if len(approx) == 4:
-                x, y, w, h = cv2.boundingRect(approx)
-                
-                if (min(w, h) >= GridParams.MIN_BOX_SIDE_SIZE and 
-                    max(w, h) <= self.x_max_grid * GridParams.MAX_BOX_SIDE_SIZE_FACTOR):
-                    self.boxes_egdes.update({(x, y), (x + w, y), (x, y + h), (x + w, y + h)})
-                    self.grid[y:y+h, x:x+w] = GridParams.THRESHOLD_MAX
+            # Calculate the minimum area rectangle
+            rect = cv2.minAreaRect(contour)
+            box = cv2.boxPoints(rect)
+            box = np.intp(box)
+
+            # Get the bounding rectangle of the minimum area rectangle
+            x, y, w, h = cv2.boundingRect(box)
+            self.boxes_edges.update({(x, y), (x + w, y), (x, y + h), (x + w, y + h)})
+
+            # Check if the dimensions meet the criteria
+            if (min(w, h) >= GridParams.MIN_BOX_SIDE_SIZE and
+                max(w, h) <= self.x_max_grid * GridParams.MAX_BOX_SIDE_SIZE_FACTOR):
+                self.grid[y:y+h, x:x+w] = GridParams.THRESHOLD_MAX
 
     def process_grid(self):
-        if self.process_counter == GridParams.PROCESSING_INTERVAL:
-            self.detect_and_fill_boxes()
-            self.process_counter = 0
+        self.detect_and_fill_boxes()
 
     def delete_frontier_artifacts(self, frontier):
         """
