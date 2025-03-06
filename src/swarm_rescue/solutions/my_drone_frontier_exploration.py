@@ -150,6 +150,13 @@ class MyDroneFrontex(DroneAbstract):
             is_near_rescuing_drone = self.check_near_rescuing_drone(threshold=20.0)
             if is_near_rescuing_drone:
                 print("Hampering a rescue, waiting...")
+                
+            # Retrieve Tracking Data
+            unrescued_wounded = self.exploration_tracker.are_there_unrescued_wounded()
+
+            is_near_rescuing_drone = self.check_near_rescuing_drone(threshold=20.0)
+            if is_near_rescuing_drone:
+                print("Hampering a rescue, waiting...")
 
             # TRANSITIONS OF THE STATE
             self.state_update(found_wall, found_wounded, found_rescue_center, is_near_rescuing_drone)
