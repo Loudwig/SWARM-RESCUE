@@ -23,6 +23,7 @@ from solutions.utils.astar import *
 from solutions.utils.messages import DroneMessage
 from solutions.utils.grids import *
 from solutions.utils.dataclasses_config import *
+from solutions.utils.exploration_tracker import *
 
 class MyDroneFrontex(DroneAbstract):
     class State(Enum):
@@ -57,6 +58,9 @@ class MyDroneFrontex(DroneAbstract):
         self.grid = OccupancyGrid(size_area_world=self.size_area,
                                   resolution=self.mapping_params.resolution,
                                   lidar=self.lidar(),semantic=self.semantic())
+        
+        # EXPLORATION TRACKER
+        self.exploration_tracker = ExplorationTracker()
 
         # POSITION
         self.previous_position = deque(maxlen=1) 

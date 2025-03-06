@@ -10,6 +10,10 @@ class MappingParams:
     display_map: bool = True
     display_binary_map = True
 
+@dataclass  # Relative to exploration_tracker.py
+class TrackingParams:
+    wounded_id_distance_threshold: float = 20.0   # Distance threshold to consider two TrackedWounded instances as referring to the same wounded
+
 @dataclass
 class WaitingStateParams:
     step_waiting: int = 20
