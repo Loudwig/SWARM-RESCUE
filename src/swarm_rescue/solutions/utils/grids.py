@@ -271,6 +271,10 @@ class OccupancyGrid(Grid):
         frontiers = [np.argwhere(labeled_array == i) for i in range(1, num_features + 1)]
         self.frontiers = [self.Frontier(cells) for cells in frontiers if len(cells) >= self.Frontier.MIN_FRONTIER_SIZE]
     
+    def save_ternary_map_as_text(self, filename="grid.txt"):
+        np.savetxt(filename, self.to_ternary_map(), fmt='%.2f', delimiter=',')
+        print(f"Ternary map saved as {filename}")
+
     def detect_and_fill_boxes(self):
         ternary_map = self.to_ternary_map()
         obstacle_mask = (ternary_map == self.OBSTACLE).astype(np.uint8) * 255
@@ -278,12 +282,16 @@ class OccupancyGrid(Grid):
         contours, _ = cv2.findContours(obstacle_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
         for contour in contours:
-            x, y, w, h = cv2.boundingRect(contour)
-
-            # Ensure it's large enough
-            if min(w, h) >= GridParams.MIN_BOX_SIDE_SIZE:
-                # Ensure it's not the whole map rectangle
-                if max(w, h) <= self.x_max_grid * GridParams.MAX_BOX_SIDE_SIZE_FACTOR:
+            # Approximate the contour to a polygon
+            epsilon = 10 * cv2.arcLength(contour, True)  # Adjust epsilon for more/less precision
+            approx = cv2.approxPolyDP(contour, epsilon, True)
+            
+            # Check if the polygon has 4 vertices (rectangle)
+            if len(approx) == 4:
+                x, y, w, h = cv2.boundingRect(approx)
+                
+                if (min(w, h) >= GridParams.MIN_BOX_SIDE_SIZE and 
+                    max(w, h) <= self.x_max_grid * GridParams.MAX_BOX_SIDE_SIZE_FACTOR):
                     self.boxes_egdes.update({(x, y), (x + w, y), (x, y + h), (x + w, y + h)})
                     self.grid[y:y+h, x:x+w] = GridParams.THRESHOLD_MAX
 
