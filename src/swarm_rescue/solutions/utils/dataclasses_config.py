@@ -11,6 +11,10 @@ class MappingParams:
     display_binary_map = True
 
 @dataclass
+class TrackingParams:
+    wounded_id_distance_threshold: float = 30.0
+
+@dataclass
 class WaitingStateParams:
     step_waiting: int = 20
 
