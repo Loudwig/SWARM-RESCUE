@@ -33,6 +33,11 @@ class WallFollowingParams:
     speed_turning: float = 0.05
 
 @dataclass
+class ManagingCollisionParams:
+    critical_collision_world_distance: float = 1.5 * MappingParams.drone_world_radius
+    step_duration_managing_collision: int = 20
+
+@dataclass
 class PIDParams:
     Kp_angle: float = 4 / math.pi
     Kp_angle_1: float = 9 / math.pi
@@ -91,10 +96,6 @@ class GridParams:
     # Used for the ternary map conversion
     FREE_THRESHOLD: float = 0
     OBSTACLE_THRESHOLD: float = 0
-
-@dataclass
-class BehaviourParams:
-    try_not_couting_drone_as_obstacle: bool = True
 
 @dataclass
 class CommunicationParams:

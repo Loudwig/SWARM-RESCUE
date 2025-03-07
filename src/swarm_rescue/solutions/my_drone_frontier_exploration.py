@@ -44,6 +44,8 @@ class MyDroneFrontex(DroneAbstract):
         SEARCHING_RETURN_AREA = auto()
         GOING_RETURN_AREA = auto()
 
+        MANAGING_COLLISION = auto()
+
     def __init__(self,
                  identifier: Optional[int] = None,
                  misc_data: Optional[MiscData] = None,
@@ -103,6 +105,10 @@ class MyDroneFrontex(DroneAbstract):
         self.path = []
         self.path_grid = []
 
+        # COLLISION PARAMS
+        self.managing_collision_command = {"forward": -0.2, "lateral": 0.5, "rotation": 0.0}
+        self.managing_collision_timestep_count = 0
+
         # COMMUNICATION
         self.new_received_message_batches: List[DroneMessageBatch] = []
         self.timestep_last_hearing = [0] * 10
@@ -134,6 +140,19 @@ class MyDroneFrontex(DroneAbstract):
     def reset_other_drones_poses(self):
         self.other_drones_poses = [None] * 10
 
+    def detect_collision(self):
+        """Returns True if there's a collision with another drone"""
+        collided = False
+        
+        for other_drone_pose in self.other_drones_poses:
+            if other_drone_pose is not None:
+                distance = np.linalg.norm(other_drone_pose.position - self.estimated_pose.position)
+                if distance <= ManagingCollisionParams.critical_collision_world_distance:
+                    collided = True
+                    break
+        
+        return collided
+
     def define_message_for_all(self):
         in_kill_zone =self.lidar().get_sensor_values() is None 
         if self.timestep_count<=1 or in_kill_zone: 
@@ -160,8 +179,11 @@ class MyDroneFrontex(DroneAbstract):
             found_wall, epsilon_wall_angle, min_dist = self.process_lidar_sensor(self.lidar())
             found_wounded, found_rescue_center, epsilon_wounded, epsilon_rescue_center, is_near_rescue_center = self.process_semantic_sensor()
 
+            self.handle_communication()
+            collided = self.detect_collision()
+
             # TRANSITIONS OF THE STATE
-            self.state_update(found_wall, found_wounded, found_rescue_center)
+            self.state_update(found_wall, found_wounded, found_rescue_center, collided)
 
             # Execute Corresponding Command
             state_handlers = {
@@ -172,9 +194,8 @@ class MyDroneFrontex(DroneAbstract):
                 self.State.SEARCHING_RESCUE_CENTER: self.handle_searching_rescue_center,
                 self.State.GOING_RESCUE_CENTER: lambda: self.handle_going_rescue_center(epsilon_rescue_center, is_near_rescue_center),
                 self.State.EXPLORING_FRONTIERS: self.handle_exploring_frontiers,
+                self.State.MANAGING_COLLISION: self.handle_managing_collision,
             }
-
-            self.handle_communication()
 
             self.visualise_actions()
 
@@ -219,6 +240,18 @@ class MyDroneFrontex(DroneAbstract):
         command = self.pid_controller(command, epsilon_wall_angle, self.pid_params.Kp_angle, self.pid_params.Kd_angle, self.pid_params.Ki_angle, self.past_ten_errors_angle, "rotation")
         command = self.pid_controller(command, epsilon_wall_distance, self.pid_params.Kp_distance, self.pid_params.Kd_distance, self.pid_params.Ki_distance, self.past_ten_errors_distance, "lateral")
 
+        return command
+    
+    def handle_managing_collision(self):
+        if self.managing_collision_timestep_count == 0:
+            self.managing_collision_command = {"forward": np.random.uniform(-0.5, 0.5),
+                                               "lateral": np.random.uniform(-0.5, 0.5),
+                                               "rotation": np.random.uniform(-0.5, 0.5)}
+
+        command = self.managing_collision_command
+        command["grasper"] = int(self.need_to_grasp)
+        self.managing_collision_timestep_count += 1
+            
         return command
 
     def handle_going_to_wounded(self, epsilon_wounded):
@@ -418,14 +451,19 @@ class MyDroneFrontex(DroneAbstract):
         # command_path = self.pid_controller(command_path,epsilon_distance_to_waypoint,self.pid_params.Kp_distance_2,self.pid_params.Kp_distance_2,self.pid_params.Ki_distance_1,self.past_ten_errors_distance,"forward",1)
 
         return command_path
+    
+    def reset_state_timestep_counters(self):
+        self.step_waiting_count = 0
+        self.managing_collision_timestep_count = 0
 
-    def state_update(self, found_wall, found_wounded, found_rescue_center):
+    def state_update(self, found_wall, found_wounded, found_rescue_center, collided):
         """
         A visualisation of the state machine is available at doc/Drone states
         """
         self.previous_state = self.state
         
         conditions = {
+            "collided": collided,
             "found_wall": found_wall,
             "lost_wall": not found_wall,
             "found_wounded": found_wounded,
@@ -434,7 +472,8 @@ class MyDroneFrontex(DroneAbstract):
             "found_rescue_center": found_rescue_center,
             "lost_rescue_center": not self.base.grasper.grasped_entities,
             "no_frontiers_left": len(self.grid.frontiers) == 0,
-            "waiting_time_over": self.step_waiting_count >= self.waiting_params.step_waiting
+            "waiting_time_over": self.step_waiting_count >= self.waiting_params.step_waiting,
+            "managing_collision_time_over": self.managing_collision_timestep_count >= ManagingCollisionParams.step_duration_managing_collision
         }
 
         STATE_TRANSITIONS = {
@@ -444,26 +483,35 @@ class MyDroneFrontex(DroneAbstract):
             },
             self.State.GOING_TO_WOUNDED: {
                 "lost_wounded": self.State.WAITING,
-                "holding_wounded": self.State.SEARCHING_RESCUE_CENTER
+                "holding_wounded": self.State.SEARCHING_RESCUE_CENTER,
+                "collided": self.State.MANAGING_COLLISION
             },
             self.State.SEARCHING_RESCUE_CENTER: {
                 "lost_rescue_center": self.State.WAITING,
-                "found_rescue_center": self.State.GOING_RESCUE_CENTER
+                "found_rescue_center": self.State.GOING_RESCUE_CENTER,
+                "collided": self.State.MANAGING_COLLISION
             },
             self.State.GOING_RESCUE_CENTER: {
-                "lost_rescue_center": self.State.WAITING
+                "lost_rescue_center": self.State.WAITING,
+                "collided": self.State.MANAGING_COLLISION
             },
             self.State.EXPLORING_FRONTIERS: {
                 "found_wounded": self.State.GOING_TO_WOUNDED,
-                "no_frontiers_left": self.State.FOLLOWING_WALL
+                "no_frontiers_left": self.State.FOLLOWING_WALL,
+                "collided": self.State.MANAGING_COLLISION
             },
             self.State.SEARCHING_WALL: {
                 "found_wounded": self.State.GOING_TO_WOUNDED,
-                "found_wall": self.State.FOLLOWING_WALL
+                "found_wall": self.State.FOLLOWING_WALL,
+                "collided": self.State.MANAGING_COLLISION
             },
             self.State.FOLLOWING_WALL: {
                 "found_wounded": self.State.GOING_TO_WOUNDED,
-                "lost_wall": self.State.SEARCHING_WALL
+                "lost_wall": self.State.SEARCHING_WALL,
+                "collided": self.State.MANAGING_COLLISION
+            },
+            self.State.MANAGING_COLLISION: {
+                "managing_collision_time_over": self.State.WAITING
             }
         }
 
@@ -472,8 +520,8 @@ class MyDroneFrontex(DroneAbstract):
                 self.state = next_state
                 break
 
-        if self.state != self.previous_state and self.state == self.State.WAITING:
-            self.step_waiting_count = 0
+        if self.state != self.previous_state:
+            self.reset_state_timestep_counters()
 
     
     def mapping(self, display = False):

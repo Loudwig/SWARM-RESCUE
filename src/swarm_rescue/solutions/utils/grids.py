@@ -9,9 +9,6 @@ from solutions.utils.astar import *
 from spg_overlay.entities.drone_distance_sensors import DroneSemanticSensor
 from solutions.utils.dataclasses_config import *
 
-
-
-
 class OccupancyGrid(Grid):
     """Self updating occupancy grid"""
 
