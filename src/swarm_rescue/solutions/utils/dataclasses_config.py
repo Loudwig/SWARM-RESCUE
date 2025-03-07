@@ -10,6 +10,7 @@ class MappingParams:
     display_map: bool = True
     display_binary_map = True
     drone_world_radius: float = 15.0
+    inflated_drone_world_radius: float = 20.0
     drone_grid_radius: int = 3
 
 @dataclass
@@ -85,7 +86,7 @@ class GridParams:
     THRESHOLD_MIN: float = -40.0
     THRESHOLD_MAX: float = 40.0
     WORLD_BORDERS_VALUE: float = THRESHOLD_MAX
-    FRONTIER_ARTIFACT_RESET_VALUE: float = THRESHOLD_MAX
+    FRONTIER_ARTIFACT_RESET_VALUE: float = 1.0
 
     # Used for the ternary map conversion
     FREE_THRESHOLD: float = 0

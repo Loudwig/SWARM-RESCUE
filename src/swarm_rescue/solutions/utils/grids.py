@@ -116,7 +116,7 @@ class OccupancyGrid(Grid):
         median_map[abs(filtered) <= 0] = self.UNDISCOVERED 
         return median_map
     
-    def update_with_sensor_data(self, pose:Pose):
+    def update_with_sensor_data(self, pose:Pose, other_drones_poses):
         """
         Uses a ray casting algorithm to update the values of cells in the grid. 
         """
@@ -146,7 +146,20 @@ class OccupancyGrid(Grid):
             self.add_value_along_line(pose.position[0], pose.position[1], pt_x, pt_y, EMPTY_ZONE_VALUE)
 
         # Rays that collide obstacles are those that verify lidar_dist[ray] < max_confidence_range
-        select_collision = lidar_dist < no_obstacle_ray_distance_threshold 
+        select_collision = lidar_dist < no_obstacle_ray_distance_threshold
+
+        select_drone_collision =  np.zeros_like(select_collision, dtype=bool)
+        for other_drone_pose in other_drones_poses:
+            if other_drone_pose is not None:
+                # Calculate distance from drone position to each ray
+                dx = points_x - other_drone_pose.position[0]
+                dy = points_y - other_drone_pose.position[1]
+                distances_to_ray = np.sqrt(dx**2 + dy**2)
+                
+                select_drone_collision |= distances_to_ray <= MappingParams.inflated_drone_world_radius
+
+        # Filter out drone collisions from obstacle collisions
+        select_collision &= ~select_drone_collision
         
         points_x = pose.position[0] + np.multiply(lidar_dist, cos_rays)
         points_y = pose.position[1] + np.multiply(lidar_dist, sin_rays)
@@ -174,7 +187,7 @@ class OccupancyGrid(Grid):
         """
         Uses both type of updates and threshold the values in the grid so they don't diverge.
         """
-        self.update_with_sensor_data(pose)
+        self.update_with_sensor_data(pose, other_drones_poses)
         self.update_with_communication(communicated_grid, other_drones_poses)
 
         # Threshold values in the grid

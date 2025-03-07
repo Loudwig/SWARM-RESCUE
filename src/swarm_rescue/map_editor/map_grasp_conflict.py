@@ -37,17 +37,17 @@ class MyMapgrasp_conflict(MapAbstract):
         # PARAMETERS MAP
         self._size_area = dimensions()
 
-        self._rescue_center = RescueCenter(size=(213, 79))
-        self._rescue_center_pos = ((-270, 247), 0)
+        self._rescue_center = RescueCenter(size=(233, 111))
+        self._rescue_center_pos = ((-254, 219), 0)
 
-        self._return_area = ReturnArea(size=(272, 107))
-        self._return_area_pos = ((-241, 220), 0)
+        self._return_area = ReturnArea(size=(316, 168))
+        self._return_area_pos = ((-226, 202), 0)
 
-        self._wounded_persons_pos = [(-271, 170)]
+        self._wounded_persons_pos = [(32, -49)]
         self._number_wounded_persons = len(self._wounded_persons_pos)
         self._wounded_persons: List[WoundedPerson] = []
 
-        self._drones_pos = [(pos, random.uniform(-math.pi, math.pi)) for pos in [(-285, 170), (-259, 170)]]
+        self._drones_pos = [(pos, random.uniform(-math.pi, math.pi)) for pos in [(-98, -44), (-29, 45), (83, 49), (147, -44), (87, -132), (-29, -138)]]
         self._number_drones = len(self._drones_pos)
         self._drones: List[DroneAbstract] = []
 

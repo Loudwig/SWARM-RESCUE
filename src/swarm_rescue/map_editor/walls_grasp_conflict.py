@@ -12,7 +12,17 @@ def dimensions():
 
 def add_walls(playground):
 
-    pass
+    wall = NormalWall(pos_start=(-401, 300), pos_end=(401, 300))
+    playground.add(wall, wall.wall_coordinates)
+
+    wall = NormalWall(pos_start=(400, 301), pos_end=(400, -301))
+    playground.add(wall, wall.wall_coordinates)
+
+    wall = NormalWall(pos_start=(-401, -300), pos_end=(401, -300))
+    playground.add(wall, wall.wall_coordinates)
+
+    wall = NormalWall(pos_start=(-400, 301), pos_end=(-400, -301))
+    playground.add(wall, wall.wall_coordinates)
 
 
 def add_boxes(playground):
