@@ -122,16 +122,16 @@ class MyDroneFrontex(DroneAbstract):
         self.path = []
 
     def define_message_for_all(self):
-        inKillZone =self.lidar().get_sensor_values() is None 
-        if self.timestep_count<=1 or inKillZone: 
+        in_kill_zone =self.lidar().get_sensor_values() is None 
+        if self.timestep_count<=1 or in_kill_zone: 
             return None
         message = self.grid.to_update(pose=self.estimated_pose)
         return message
 
     def control(self):
-        inKillZone =self.lidar().get_sensor_values() is None 
+        in_kill_zone =self.lidar().get_sensor_values() is None 
 
-        if not inKillZone : 
+        if not in_kill_zone : 
 
             self.timestep_count += 1
             
@@ -445,10 +445,9 @@ class MyDroneFrontex(DroneAbstract):
         
         if self.timestep_count == 1: # first iterations
             print("Starting control")
-            start_x, start_y = self.measured_gps_position() # never none ? 
+            start_x, start_y = self.measured_gps_position()
             print(f"Initial position: {start_x}, {start_y}")
             self.grid.set_initial_cell(start_x, start_y)
-        
 
         self.estimated_pose = Pose(np.asarray(self.measured_gps_position()),
                                    self.measured_compass_angle(),self.odometer_values(),self.previous_position[-1],self.previous_orientation[-1],self.size_area)
@@ -456,13 +455,10 @@ class MyDroneFrontex(DroneAbstract):
         self.previous_position.append(self.estimated_pose.position)
         self.previous_orientation.append(self.estimated_pose.orientation)
         
-        grid_update_informations = self.grid.to_update(pose=self.estimated_pose)
         if self.communicator:
-            received_messages = self.communicator.received_messages
-            for msg in received_messages:
-                message = msg[1]
-                grid_update_informations += message
-        self.grid.update(grid_update_informations)
+            pass
+
+        self.grid.full_update(self.estimated_pose)
         
         if display and (self.timestep_count % 5 == 0):
              self.grid.display(self.grid.zoomed_grid,

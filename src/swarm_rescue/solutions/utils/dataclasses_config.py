@@ -92,3 +92,7 @@ class GridParams:
 @dataclass
 class BehaviourParams:
     try_not_couting_drone_as_obstacle: bool = True
+
+@dataclass
+class CommunicationParams:
+    map_communication_interval: int = 50    # in timesteps

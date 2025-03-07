@@ -89,6 +89,15 @@ class OccupancyGrid(Grid):
             self.initial_cell = (cell_x, cell_y)
     
     def to_ternary_map(self):
+        """
+        Convert the probabilistic occupancy grid into a ternary grid.
+        OBSTACLE = 1
+        FREE = 0
+        UNDISCOVERED = -2
+        Cells with value > OBSTACLE_THRESHOLD are considered obstacles.
+        Cells with value < FREE_THRESHOLD are considered free.
+        Cells with value = 0 are considered undiscovered
+        """
         OBSTACLE_THRESHOLD = GridParams.OBSTACLE_THRESHOLD
         FREE_THRESHOLD = GridParams.FREE_THRESHOLD
 
@@ -106,30 +115,10 @@ class OccupancyGrid(Grid):
         median_map[filtered > seuil] = self.OBSTACLE
         median_map[abs(filtered) <= 0] = self.UNDISCOVERED 
         return median_map
-        
-
-
-
-    def to_binary_map(self):
-        """
-        Convert the probabilistic occupancy grid into a ternary grid.
-        OBSTACLE = 1
-        FREE = 0
-        UNDISCOVERED = -2
-        Cells with value > OBSTACLE_THRESHOLD are considered obstacles.
-        Cells with value < FREE_THRESHOLD are considered free.
-        Cells with value = 0 are considered undiscovered
-        """
-        #print(np.count_nonzero(self.grid < 0))
-        binary_map = np.zeros_like(self.grid, dtype=int)
-        binary_map[self.grid > 2] = self.OBSTACLE
-        binary_map[abs(self.grid) <= 2] = self.UNDISCOVERED
-        return binary_map
     
-    def to_update(self, pose: Pose):
+    def update_with_sensor_data(self, pose:Pose):
         """
-        Returns the list of things to update on the grid
-        Uses a ray casting algorithm with the lidar data
+        Uses a ray casting algorithm to update the values of cells in the grid. 
         """
         to_update = []
 
@@ -149,20 +138,14 @@ class OccupancyGrid(Grid):
 
         # Any ray that has an associated lidar_dist greater than this threshold is considered to have no obstacle
         no_obstacle_ray_distance_threshold = MAX_RANGE_LIDAR_SENSOR * MAX_RANGE_LIDAR_SENSOR_FACTOR
-
         # Ensure coherent values to balance noise on lidar values
         processed_lidar_dist = np.clip(lidar_dist - LIDAR_DIST_CLIP, 0, no_obstacle_ray_distance_threshold)
-        points_x = pose.position[0] + np.multiply(processed_lidar_dist,
-                                                  cos_rays)
-        points_y = pose.position[1] + np.multiply(processed_lidar_dist,
-                                                  sin_rays)
+
+        points_x = pose.position[0] + np.multiply(processed_lidar_dist, cos_rays)
+        points_y = pose.position[1] + np.multiply(processed_lidar_dist, sin_rays)
 
         for pt_x, pt_y in zip(points_x, points_y):
-            to_update.append(DroneMessage(
-                            subject=DroneMessage.Subject.MAPPING,
-                            code=DroneMessage.Code.LINE,
-                            arg=(pose.position[0], pose.position[1], pt_x, pt_y, EMPTY_ZONE_VALUE))
-                            )
+            self.add_value_along_line(pose.position[0], pose.position[1], pt_x, pt_y, EMPTY_ZONE_VALUE)
 
         # Rays that collide obstacles are those that verify lidar_dist[ray] < max_confidence_range
         select_collision = lidar_dist < no_obstacle_ray_distance_threshold 
@@ -170,70 +153,35 @@ class OccupancyGrid(Grid):
         points_x = pose.position[0] + np.multiply(lidar_dist, cos_rays)
         points_y = pose.position[1] + np.multiply(lidar_dist, sin_rays)
         
-        if BehaviourParams().try_not_couting_drone_as_obstacle: 
-                # print(len(select_collision))
+        if BehaviourParams().try_not_couting_drone_as_obstacle:
                 zone_drone_x , zone_drone_y = self.compute_near_drones_zone(pose)
                 epsilon = 3
                 for ind,v in enumerate(select_collision):
                     if select_collision[ind] == True:
                         if self.list_any_comparaison_int(abs(zone_drone_x - points_x[ind]),epsilon) and self.list_any_comparaison_int(abs(zone_drone_y - points_y[ind]),epsilon): 
-                            # print("NEAR ZONE DRONE")
                             select_collision[ind] =  False
         
         points_x = points_x[select_collision]
         points_y = points_y[select_collision]
 
-        
-        to_update.append(DroneMessage(
-                        subject=DroneMessage.Subject.MAPPING,
-                        code=DroneMessage.Code.POINTS,
-                        arg=(points_x, points_y, OBSTACLE_ZONE_VALUE))
-                        )
+        self.add_points(points_x, points_y, OBSTACLE_ZONE_VALUE)
 
         # the current position of the drone is free !
-        to_update.append(DroneMessage(
-                        subject=DroneMessage.Subject.MAPPING,
-                        code=DroneMessage.Code.POINTS,
-                        arg=(pose.position[0], pose.position[1], FREE_ZONE_VALUE))
-                        )
+        self.add_points(pose.position[0], pose.position[1], FREE_ZONE_VALUE)
+    
+    def update_with_communication(self):
+        pass
 
-        return to_update
-
-    def update(self, to_update):
+    def full_update(self, pose:Pose):
         """
-        Bayesian map update with new observation
-        lidar : lidar data
-        pose : corrected pose in world coordinates
+        Uses both type of updates and threshold the values in the grid so they don't diverge.
         """
-        THRESHOLD_MIN = GridParams.THRESHOLD_MIN
-        THRESHOLD_MAX = GridParams.THRESHOLD_MAX
-
-        for message in to_update:
-            # Ensure the message is a valid DroneMessage instance
-            if not isinstance(message, DroneMessage):
-                raise ValueError("Invalid message type. Expected a DroneMessage instance.")
-
-            code = message.code
-            arg = message.arg
-
-            if code == DroneMessage.Code.LINE:
-                self.add_value_along_line(*arg)
-            elif code == DroneMessage.Code.POINTS:
-                self.add_points(*arg)
-            else:
-                raise ValueError(f"Unknown code in DroneMessage: {code}")
+        self.update_with_sensor_data(pose)
+        self.update_with_communication()
 
         # Threshold values in the grid
-        self.grid = np.clip(self.grid, THRESHOLD_MIN, THRESHOLD_MAX)
+        self.grid = np.clip(self.grid, GridParams.THRESHOLD_MIN, GridParams.THRESHOLD_MAX)
 
-
-        # # Restore the initial cell value # That could have been set to free or empty
-        # if self.initial_cell and self.initial_cell_value is not None:
-        #     cell_x, cell_y = self.initial_cell
-        #     if 0 <= cell_x < self.x_max_grid and 0 <= cell_y < self.y_max_grid:
-        #         self.grid[cell_x, cell_y] = self.initial_cell_value
-
-        # compute zoomed grid for displaying
         self.zoomed_grid = self.grid.copy()
         
         new_zoomed_size = (int(self.size_area_world[1] * 0.5),
