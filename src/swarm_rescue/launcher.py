@@ -20,12 +20,13 @@ from maps.map_final_2022_23 import MyMapFinal2022_23
 from maps.map_medium_01 import MyMapMedium01
 from maps.map_medium_02 import MyMapMedium02
 
-# Test map_editor
+# Maps from map_editor
 from map_editor.map_test import MyMaptest
 from map_editor.map_test2 import MyMaptest2
 from map_editor.map_test3 import MyMaptest3
 from map_editor.map_box import MyMapbox
 from map_editor.map_KillZoneTest import MyMapKillZoneTest
+from map_editor.map_grasp_conflict import MyMapgrasp_conflict
 
 from solutions.my_drone_random import MyDroneRandom
 from solutions.my_drone_frontier_exploration import MyDroneFrontex
@@ -80,7 +81,7 @@ class Launcher:
         eval_config = EvalConfig(map_type=MyMapFinal2022_23,zones_config=zones_config, nb_rounds=1)
 
         """IF YOU WANT NO SPECIAL ZONES"""
-        eval_config = EvalConfig(map_type=MyMapbox, nb_rounds=1)
+        eval_config = EvalConfig(map_type=MyMapgrasp_conflict, nb_rounds=1)
 
         self.eval_plan.add(eval_config=eval_config)
 
