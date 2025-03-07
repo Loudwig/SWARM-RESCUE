@@ -169,15 +169,18 @@ class OccupancyGrid(Grid):
         # the current position of the drone is free !
         self.add_points(pose.position[0], pose.position[1], FREE_ZONE_VALUE)
     
-    def update_with_communication(self):
-        pass
+    def update_with_communication(self, list_communicated_grids):
+        for communicated_grid in list_communicated_grids:
+            # Add only the communicated grid information that is not already known
+            unexplored_mask = (self.grid == 0)
+            self.grid += communicated_grid * unexplored_mask
 
-    def full_update(self, pose:Pose):
+    def full_update(self, pose:Pose, communicated_grid):
         """
         Uses both type of updates and threshold the values in the grid so they don't diverge.
         """
         self.update_with_sensor_data(pose)
-        self.update_with_communication()
+        self.update_with_communication(communicated_grid)
 
         # Threshold values in the grid
         self.grid = np.clip(self.grid, GridParams.THRESHOLD_MIN, GridParams.THRESHOLD_MAX)

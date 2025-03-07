@@ -20,7 +20,7 @@ from spg_overlay.utils.utils import circular_mean, normalize_angle
 from solutions.utils.pose import Pose
 from spg_overlay.utils.grid import Grid
 from solutions.utils.astar import *
-from solutions.utils.messages import DroneMessage
+from solutions.utils.messages import *
 from solutions.utils.grids import *
 from solutions.utils.dataclasses_config import *
 from solutions.utils.exploration_tracker import *
@@ -103,6 +103,9 @@ class MyDroneFrontex(DroneAbstract):
         self.path = []
         self.path_grid = []
 
+        # COMMUNICATION
+        self.new_received_message_batches = None
+
         # LOG PARAMS
         self.log_params = LogParams()   
         self.timestep_count = 0
@@ -125,8 +128,12 @@ class MyDroneFrontex(DroneAbstract):
         in_kill_zone =self.lidar().get_sensor_values() is None 
         if self.timestep_count<=1 or in_kill_zone: 
             return None
-        message = self.grid.to_update(pose=self.estimated_pose)
-        return message
+        
+        message_batch = DroneMessageBatch(sender_id=self.identifier)
+        message_batch.add_message(DroneMessage(subject=DroneMessage.Subject.PING))
+        message_batch.add_message(DroneMessage(subject=DroneMessage.Subject.GRID_COMMUNICATION, body=self.grid.grid))
+        
+        return message_batch
 
     def control(self):
         in_kill_zone =self.lidar().get_sensor_values() is None 
@@ -154,6 +161,11 @@ class MyDroneFrontex(DroneAbstract):
                 self.State.GOING_RESCUE_CENTER: lambda: self.handle_going_rescue_center(epsilon_rescue_center, is_near_rescue_center),
                 self.State.EXPLORING_FRONTIERS: self.handle_exploring_frontiers,
             }
+
+            if self.communicator:
+                self.new_received_message_batches = [m[1] for m in self.communicator.received_messages]    # The simulator already groups received messages by sender
+            else:
+                self.new_received_messages_batches = None
 
             self.visualise_actions()
 
@@ -455,10 +467,13 @@ class MyDroneFrontex(DroneAbstract):
         self.previous_position.append(self.estimated_pose.position)
         self.previous_orientation.append(self.estimated_pose.orientation)
         
-        if self.communicator:
-            pass
+        list_communicated_grids = []
+        if self.new_received_message_batches is not None:
+            for message_batch in self.new_received_message_batches:
+                for grid_message in message_batch.get_messages_by_subject(DroneMessage.Subject.GRID_COMMUNICATION):
+                    list_communicated_grids.append(grid_message.body)
 
-        self.grid.full_update(self.estimated_pose)
+        self.grid.full_update(self.estimated_pose, list_communicated_grids)
         
         if display and (self.timestep_count % 5 == 0):
              self.grid.display(self.grid.zoomed_grid,
