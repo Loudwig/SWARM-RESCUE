@@ -1,7 +1,8 @@
 class DroneMessage:
     class Subject:
-        GRID_COMMUNICATION = "GRID_COMMUNICATION"
         PING = "PING"
+        DRONE_POSITION = "DRONE_POSITION"
+        GRID_COMMUNICATION = "GRID_COMMUNICATION"
 
     def __init__(self, subject: str, body=None, sender_id=None):
         if subject not in vars(DroneMessage.Subject).values():

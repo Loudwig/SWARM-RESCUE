@@ -116,7 +116,7 @@ class OccupancyGrid(Grid):
         median_map[abs(filtered) <= 0] = self.UNDISCOVERED 
         return median_map
     
-    def update_with_sensor_data(self, pose:Pose):
+    def update_with_sensor_data(self, pose:Pose, other_drones_poses=None):
         """
         Uses a ray casting algorithm to update the values of cells in the grid. 
         """
@@ -153,6 +153,7 @@ class OccupancyGrid(Grid):
         points_x = pose.position[0] + np.multiply(lidar_dist, cos_rays)
         points_y = pose.position[1] + np.multiply(lidar_dist, sin_rays)
         
+        ###############################
         if BehaviourParams().try_not_couting_drone_as_obstacle:
                 zone_drone_x , zone_drone_y = self.compute_near_drones_zone(pose)
                 epsilon = 3
@@ -160,7 +161,8 @@ class OccupancyGrid(Grid):
                     if select_collision[ind] == True:
                         if self.list_any_comparaison_int(abs(zone_drone_x - points_x[ind]),epsilon) and self.list_any_comparaison_int(abs(zone_drone_y - points_y[ind]),epsilon): 
                             select_collision[ind] =  False
-        
+        ###############################
+
         points_x = points_x[select_collision]
         points_y = points_y[select_collision]
 
@@ -268,21 +270,3 @@ class OccupancyGrid(Grid):
         path_simplified = simplify_collinear_points(path)
         path_line_of_sight = simplify_by_line_of_sight(path_simplified, MAP)
         return ramer_douglas_peucker(path_line_of_sight, 0.5)
-    
-    def compute_near_drones_zone(self,pose:Pose):
-        detection_semantic = self.semantic.get_sensor_values().copy()
-        zone_drone_x = []
-        zone_drone_y = []
-        for data in detection_semantic:
-            if (data.entity_type == DroneSemanticSensor.TypeEntity.DRONE):
-                cos_rays = np.cos(data.angle + pose.orientation)
-                sin_rays = np.sin(data.angle + pose.orientation)
-                
-                zone_drone_x.append(pose.position[0] + np.multiply(data.distance, cos_rays))
-                zone_drone_y.append(pose.position[1] + np.multiply(data.distance, sin_rays))
-        return zone_drone_x,zone_drone_y
-    
-    def list_any_comparaison_int(self,L,i):
-        for x in L : 
-            if x < i : return True
-        return False

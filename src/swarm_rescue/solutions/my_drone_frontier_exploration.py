@@ -106,6 +106,7 @@ class MyDroneFrontex(DroneAbstract):
         # COMMUNICATION
         self.new_received_message_batches = None
         self.timestep_last_hearing = [0] * 10
+        self.other_drones_pos = [None] * 10
 
         # TIME
         self.timestep_count = 0
@@ -129,6 +130,9 @@ class MyDroneFrontex(DroneAbstract):
     
     def time_steps_since_hearing(self, drone_id):
         return self.timestep_count - self.timestep_last_hearing[drone_id]
+    
+    def reset_other_drones_pos(self):
+        self.other_drones_pos = [None] * 10
 
     def define_message_for_all(self):
         in_kill_zone =self.lidar().get_sensor_values() is None 
@@ -137,6 +141,7 @@ class MyDroneFrontex(DroneAbstract):
         
         message_batch = DroneMessageBatch(sender_id=self.identifier)
         message_batch.add_message(DroneMessage(subject=DroneMessage.Subject.PING))
+        message_batch.add_message(DroneMessage(subject=DroneMessage.Subject.DRONE_POSITION, body=self.estimated_pose))
         message_batch.add_message(DroneMessage(subject=DroneMessage.Subject.GRID_COMMUNICATION, body=self.grid.grid))
         
         return message_batch
@@ -168,10 +173,13 @@ class MyDroneFrontex(DroneAbstract):
                 self.State.EXPLORING_FRONTIERS: self.handle_exploring_frontiers,
             }
 
+            self.reset_other_drones_pos()   # Only values other than None are accurate (because they are recent)
+
             if self.communicator:
                 self.new_received_message_batches = [m[1] for m in self.communicator.received_messages]    # The simulator already groups received messages by sender
                 for message_batch in self.new_received_message_batches:
                     self.timestep_last_hearing[message_batch.sender_id] = self.timestep_count
+                    self.other_drones_pos[]
             else:
                 self.new_received_messages_batches = None
 
