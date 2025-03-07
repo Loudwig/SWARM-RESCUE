@@ -126,6 +126,9 @@ class MyDroneFrontex(DroneAbstract):
         self.next_frontier_centroid = None
         self.finished_path = True
         self.path = []
+    
+    def time_steps_since_hearing(self, drone_id):
+        return self.timestep_count - self.timestep_last_hearing[drone_id]
 
     def define_message_for_all(self):
         in_kill_zone =self.lidar().get_sensor_values() is None 
@@ -475,8 +478,9 @@ class MyDroneFrontex(DroneAbstract):
         list_communicated_grids = []
         if self.new_received_message_batches is not None:
             for message_batch in self.new_received_message_batches:
-                for grid_message in message_batch.get_messages_by_subject(DroneMessage.Subject.GRID_COMMUNICATION):
-                    list_communicated_grids.append(grid_message.body)
+                if self.time_steps_since_hearing(message_batch.sender_id) >= CommunicationParams.map_communication_minimum_interval:
+                    for grid_message in message_batch.get_messages_by_subject(DroneMessage.Subject.GRID_COMMUNICATION):
+                        list_communicated_grids.append(grid_message.body)
 
         self.grid.full_update(self.estimated_pose, list_communicated_grids)
         

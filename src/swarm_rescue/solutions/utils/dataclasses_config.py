@@ -95,4 +95,4 @@ class BehaviourParams:
 
 @dataclass
 class CommunicationParams:
-    map_communication_interval: int = 50    # in timesteps
+    map_communication_minimum_interval: int = 50    # in timesteps
