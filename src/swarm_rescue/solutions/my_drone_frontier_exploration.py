@@ -6,19 +6,14 @@ from enum import Enum, auto
 from collections import deque
 import math
 from typing import List, Optional
-import cv2
 import numpy as np
 import arcade
 
-from spg_overlay.utils.constants import MAX_RANGE_LIDAR_SENSOR
 from spg_overlay.entities.drone_abstract import DroneAbstract
 from spg_overlay.utils.misc_data import MiscData
 from spg_overlay.entities.drone_distance_sensors import DroneSemanticSensor
-from spg_overlay.entities.rescue_center import RescueCenter
-from spg_overlay.entities.wounded_person import WoundedPerson
 from spg_overlay.utils.utils import circular_mean, normalize_angle
 from solutions.utils.pose import Pose
-from spg_overlay.utils.grid import Grid
 from solutions.utils.astar import *
 from solutions.utils.messages import *
 from solutions.utils.grids import *
@@ -342,6 +337,12 @@ class MyDroneFrontex(DroneAbstract):
                     (data.distance * data.distance / 10 ** 5)
                 scores.append((v, data.angle, data.distance))
 
+                # Exploration tracker
+                pose = self.estimated_pose
+                wounded_sighting_position = self.estimated_pose.position + data.distance * np.array(
+                    [np.cos(data.angle + pose.orientation), np.sin(data.angle + pose.orientation)])
+                self.exploration_tracker.add_wounded(wounded_sighting_position)
+
         # Select the best one among wounded persons detected
         best_score = 10000
         for score in scores:
@@ -616,7 +617,12 @@ class MyDroneFrontex(DroneAbstract):
             
             if self.visualisation_params.draw_frontier_points and self.next_frontier is not None:
                 for point in self.next_frontier.cells:
-                    self.draw_point(self.grid._conv_grid_to_world(*point) + self._half_size_array, color=arcade.color.AIR_FORCE_BLUE)     # frame of reference change
+                    self.draw_point(self.grid._conv_grid_to_world(*point) + self._half_size_array, color=arcade.color.AIR_FORCE_BLUE)
+        
+        if self.visualisation_params.draw_unrescued_wounded:
+            for wounded in self.exploration_tracker.wounded_persons:
+                if not wounded.rescued:
+                    self.draw_point(wounded.position + self._half_size_array, color=arcade.color.NAVAJO_WHITE)
 
     def visualise_actions(self):
         """

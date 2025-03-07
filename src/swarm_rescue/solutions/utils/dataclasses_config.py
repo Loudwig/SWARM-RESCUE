@@ -15,7 +15,8 @@ class MappingParams:
 
 @dataclass
 class TrackingParams:
-    wounded_id_distance_threshold: float = 20.0
+    wounded_id_add_distance_threshold: float = 20.0
+    wounded_id_remove_distance_threshold: float = 50.0
 
 @dataclass
 class WaitingStateParams:
@@ -71,7 +72,8 @@ class LogParams:
 class VisualisationParams:
     draw_path: bool = True
     draw_frontier_centroid: bool = True
-    draw_frontier_points: bool = True
+    draw_frontier_points: bool = False
+    draw_unrescued_wounded: bool = True
 
 @dataclass  # Relative to grids.py
 class GridParams:
