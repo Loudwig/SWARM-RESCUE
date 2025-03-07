@@ -105,10 +105,13 @@ class MyDroneFrontex(DroneAbstract):
 
         # COMMUNICATION
         self.new_received_message_batches = None
+        self.timestep_last_hearing = [0] * 10
+
+        # TIME
+        self.timestep_count = 0
 
         # LOG PARAMS
         self.log_params = LogParams()   
-        self.timestep_count = 0
 
         # GRAPHICAL INTERFACE
         self.visualisation_params = VisualisationParams()
@@ -164,6 +167,8 @@ class MyDroneFrontex(DroneAbstract):
 
             if self.communicator:
                 self.new_received_message_batches = [m[1] for m in self.communicator.received_messages]    # The simulator already groups received messages by sender
+                for message_batch in self.new_received_message_batches:
+                    self.timestep_last_hearing[message_batch.sender_id] = self.timestep_count
             else:
                 self.new_received_messages_batches = None
 
