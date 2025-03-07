@@ -1,3 +1,5 @@
+from typing import List
+
 class DroneMessage:
     class Subject:
         PING = "PING"
@@ -15,7 +17,7 @@ class DroneMessage:
 class DroneMessageBatch:
     """Container for multiple DroneMessage objects"""
     def __init__(self, sender_id=None):
-        self.messages = []
+        self.messages: List[DroneMessage] = []
         self.sender_id = sender_id
 
     def add_message(self, message: DroneMessage):

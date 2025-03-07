@@ -5,7 +5,7 @@ The drone explores the map following frontiers between explored an unexplored ar
 from enum import Enum, auto
 from collections import deque
 import math
-from typing import Optional
+from typing import List, Optional
 import cv2
 import numpy as np
 import arcade
@@ -104,9 +104,9 @@ class MyDroneFrontex(DroneAbstract):
         self.path_grid = []
 
         # COMMUNICATION
-        self.new_received_message_batches = None
+        self.new_received_message_batches: List[DroneMessageBatch] = []
         self.timestep_last_hearing = [0] * 10
-        self.other_drones_pos = [None] * 10
+        self.other_drones_poses: List[Optional[Pose]] = [None] * 10
 
         # TIME
         self.timestep_count = 0
@@ -131,8 +131,8 @@ class MyDroneFrontex(DroneAbstract):
     def time_steps_since_hearing(self, drone_id):
         return self.timestep_count - self.timestep_last_hearing[drone_id]
     
-    def reset_other_drones_pos(self):
-        self.other_drones_pos = [None] * 10
+    def reset_other_drones_poses(self):
+        self.other_drones_poses = [None] * 10
 
     def define_message_for_all(self):
         in_kill_zone =self.lidar().get_sensor_values() is None 
@@ -154,6 +154,7 @@ class MyDroneFrontex(DroneAbstract):
             self.timestep_count += 1
             
             self.mapping(display=self.mapping_params.display_map)
+            self.reset_other_drones_poses()   # Only values other than None are accurate (because they are recent)
 
             # Retrieve Sensor Data
             found_wall, epsilon_wall_angle, min_dist = self.process_lidar_sensor(self.lidar())
@@ -173,15 +174,7 @@ class MyDroneFrontex(DroneAbstract):
                 self.State.EXPLORING_FRONTIERS: self.handle_exploring_frontiers,
             }
 
-            self.reset_other_drones_pos()   # Only values other than None are accurate (because they are recent)
-
-            if self.communicator:
-                self.new_received_message_batches = [m[1] for m in self.communicator.received_messages]    # The simulator already groups received messages by sender
-                for message_batch in self.new_received_message_batches:
-                    self.timestep_last_hearing[message_batch.sender_id] = self.timestep_count
-                    self.other_drones_pos[]
-            else:
-                self.new_received_messages_batches = None
+            self.handle_communication()
 
             self.visualise_actions()
 
@@ -190,6 +183,20 @@ class MyDroneFrontex(DroneAbstract):
         else : 
             # Drone in KillZone. Or at least no lidar available
             return {"forward": 0.0, "lateral": 0.0, "rotation": 0.0, "grasper": 0}
+
+    def handle_communication(self):
+        if self.communicator:
+            self.new_received_message_batches = [m[1] for m in self.communicator.received_messages]    # The simulator already groups received messages by sender
+        else:
+            self.new_received_messages_batches = None
+
+        for message_batch in self.new_received_message_batches:
+            # Last hearing (from other drones) timestep update
+            self.timestep_last_hearing[message_batch.sender_id] = self.timestep_count
+        
+            # Other drones positions
+            for position_message in message_batch.get_messages_by_subject(DroneMessage.Subject.DRONE_POSITION):
+                self.other_drones_poses[position_message.sender_id] = position_message.body
 
     def handle_waiting(self):
         self.need_to_grasp = False
@@ -484,13 +491,12 @@ class MyDroneFrontex(DroneAbstract):
         self.previous_orientation.append(self.estimated_pose.orientation)
         
         list_communicated_grids = []
-        if self.new_received_message_batches is not None:
-            for message_batch in self.new_received_message_batches:
-                if self.time_steps_since_hearing(message_batch.sender_id) >= CommunicationParams.map_communication_minimum_interval:
-                    for grid_message in message_batch.get_messages_by_subject(DroneMessage.Subject.GRID_COMMUNICATION):
-                        list_communicated_grids.append(grid_message.body)
+        for message_batch in self.new_received_message_batches:
+            if self.time_steps_since_hearing(message_batch.sender_id) >= CommunicationParams.map_communication_minimum_interval:
+                for grid_message in message_batch.get_messages_by_subject(DroneMessage.Subject.GRID_COMMUNICATION):
+                    list_communicated_grids.append(grid_message.body)
 
-        self.grid.full_update(self.estimated_pose, list_communicated_grids)
+        self.grid.full_update(self.estimated_pose, list_communicated_grids, self.other_drones_poses)
         
         if display and (self.timestep_count % 5 == 0):
              self.grid.display(self.grid.zoomed_grid,

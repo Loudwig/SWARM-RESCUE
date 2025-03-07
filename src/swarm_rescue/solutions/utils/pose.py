@@ -28,16 +28,6 @@ class Position:
     def y(self):
         return self.data[1]
 
-
-# class Pose:
-#     def __init__(self, position=Position(), orientation=0.0):
-#         if not isinstance(position, Position):
-#             print("type position=", type(position))
-#             raise TypeError("position must be an instance of Position")
-#         self.position: Position = position
-#         self.orientation: float = orientation
-
-
 class Pose:
     def __init__(self, position=np.zeros(2, ), orientation=0.0,odometer=[0.0,0.0,0.0],previous_position=np.zeros(2, ),previous_orientation=0.0,taille :Tuple[float, float] = (0.0,0.0)):
 
@@ -70,3 +60,6 @@ class Pose:
             self.gps = True
             self.position: np.array = position
             self.orientation: float = orientation
+    
+    def distance(self, pose):
+        return np.linalg.norm(self.position - pose.position)

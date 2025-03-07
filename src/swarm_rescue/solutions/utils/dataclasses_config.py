@@ -9,6 +9,8 @@ class MappingParams:
     resolution: int = 8     # 8 to 1 factor from simulation pixels to grid (efficiency)
     display_map: bool = True
     display_binary_map = True
+    drone_world_radius: float = 15.0
+    drone_grid_radius: int = 3
 
 @dataclass
 class TrackingParams:

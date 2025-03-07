@@ -116,12 +116,10 @@ class OccupancyGrid(Grid):
         median_map[abs(filtered) <= 0] = self.UNDISCOVERED 
         return median_map
     
-    def update_with_sensor_data(self, pose:Pose, other_drones_poses=None):
+    def update_with_sensor_data(self, pose:Pose):
         """
         Uses a ray casting algorithm to update the values of cells in the grid. 
         """
-        to_update = []
-
         EVERY_N = GridParams.EVERY_N
         LIDAR_DIST_CLIP = GridParams.LIDAR_DIST_CLIP
         MAX_RANGE_LIDAR_SENSOR_FACTOR = GridParams.MAX_RANGE_LIDAR_SENSOR_FACTOR
@@ -152,18 +150,8 @@ class OccupancyGrid(Grid):
         
         points_x = pose.position[0] + np.multiply(lidar_dist, cos_rays)
         points_y = pose.position[1] + np.multiply(lidar_dist, sin_rays)
-        
-        ###############################
-        if BehaviourParams().try_not_couting_drone_as_obstacle:
-                zone_drone_x , zone_drone_y = self.compute_near_drones_zone(pose)
-                epsilon = 3
-                for ind,v in enumerate(select_collision):
-                    if select_collision[ind] == True:
-                        if self.list_any_comparaison_int(abs(zone_drone_x - points_x[ind]),epsilon) and self.list_any_comparaison_int(abs(zone_drone_y - points_y[ind]),epsilon): 
-                            select_collision[ind] =  False
-        ###############################
 
-        points_x = points_x[select_collision]
+        points_x = points_x[select_collision]   # only keeps points that are considered valid obstacles (deletes the other)
         points_y = points_y[select_collision]
 
         self.add_points(points_x, points_y, OBSTACLE_ZONE_VALUE)
@@ -171,18 +159,23 @@ class OccupancyGrid(Grid):
         # the current position of the drone is free !
         self.add_points(pose.position[0], pose.position[1], FREE_ZONE_VALUE)
     
-    def update_with_communication(self, list_communicated_grids):
+    def update_with_communication(self, list_communicated_grids, other_drones_poses):
         for communicated_grid in list_communicated_grids:
             # Add only the communicated grid information that is not already known
             unexplored_mask = (self.grid == 0)
             self.grid += communicated_grid * unexplored_mask
+        
+        # the current position of other drone is free ! Also balances the issue that drone are considered obstacles by the lidar
+        for pose in other_drones_poses:
+            if pose is not None:
+                self.add_points(pose.position[0], pose.position[1], GridParams.FREE_ZONE_VALUE)
 
-    def full_update(self, pose:Pose, communicated_grid):
+    def full_update(self, pose:Pose, communicated_grid, other_drones_poses):
         """
         Uses both type of updates and threshold the values in the grid so they don't diverge.
         """
         self.update_with_sensor_data(pose)
-        self.update_with_communication(communicated_grid)
+        self.update_with_communication(communicated_grid, other_drones_poses)
 
         # Threshold values in the grid
         self.grid = np.clip(self.grid, GridParams.THRESHOLD_MIN, GridParams.THRESHOLD_MAX)
