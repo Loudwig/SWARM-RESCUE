@@ -111,6 +111,8 @@ class MyDroneFrontex(DroneAbstract):
 
         self.wounded_locked = []
         self.other_drones_pos = []
+
+        self.history_health = deque(maxlen=10)
     
     def reset_exploration_path_params(self):
         """
@@ -169,21 +171,25 @@ class MyDroneFrontex(DroneAbstract):
             return 0.1
         else :
             return 0.5
+    
     def control(self):
         inKillZone =self.lidar().get_sensor_values() is None 
 
         if not inKillZone : 
 
             self.timestep_count += 1
+            self.history_health.append(self._drone_health)
             
             self.mapping(display=self.mapping_params.display_map)
+            
+            
             self.communication_management()
 
             # Retrieve Sensor Data
             found_wall, epsilon_wall_angle, min_dist = self.process_lidar_sensor(self.lidar())
             found_wounded, found_rescue_center, score_wounded, epsilon_wounded, epsilon_rescue_center, is_near_rescue_center,min_dist_wnd = self.process_semantic_sensor()
 
-            is_near_rescuing_drone = self.check_near_rescuing_drone(threshold=30.0)
+            is_near_rescuing_drone = self.check_near_rescuing_drone(threshold=60.0)
             if is_near_rescuing_drone:
                 print("Hampering a rescue, waiting...")
 
@@ -201,7 +207,7 @@ class MyDroneFrontex(DroneAbstract):
                 self.State.EXPLORING_FRONTIERS: self.handle_exploring_frontiers,
             }
 
-            print(self.identifier, self.state)
+            # print(self.identifier, self.state)
 
             self.visualise_actions()
 
@@ -214,7 +220,7 @@ class MyDroneFrontex(DroneAbstract):
     def handle_waiting(self):
         self.reset_exploration_path_params()
         self.step_waiting_count += 1
-        return {"forward": 0.0, "lateral": 0.0, "rotation": 0.0, "grasper": 0}
+        return {"forward": 0.0, "lateral": 0.0, "rotation": np.random.random(), "grasper": 0}
 
     def handle_searching_wall(self):
         return {"forward": 0.5, "lateral": 0.0, "rotation": 0.0, "grasper": 0}
@@ -233,7 +239,7 @@ class MyDroneFrontex(DroneAbstract):
 
     def handle_grasping_wounded(self, score_wounded, epsilon_wounded):
         epsilon_wounded = normalize_angle(epsilon_wounded)
-        print(self.identifier,score_wounded)
+        # print(self.identifier,score_wounded)
         command = {"forward": self.grasping_params.grasping_speed, "lateral": 0.0, "rotation": 0.0, "grasper": 1 if score_wounded<GraspingParams().grasping_dist else 0}
         return self.pid_controller(command, epsilon_wounded, self.pid_params.Kp_angle, self.pid_params.Kd_angle, self.pid_params.Ki_angle, self.past_ten_errors_angle, "rotation")
 
@@ -300,10 +306,20 @@ class MyDroneFrontex(DroneAbstract):
         for i, drone_id in enumerate(drone_ids):
             drone_pos = drone_positions[drone_id]
             for j, cluster in enumerate(clusters):
-                centroid = cluster["centroid"]
-                # Le coût est la distance euclidienne divisée par (taille du cluster + 1)
-                cost_matrix[i, j] = np.linalg.norm(drone_pos - centroid) / (cluster["size"] + 1)
-
+                cell_centroid = cluster.point_closest_to_centroid()
+                # Le coût est la distance à parcourir si jamais il prend le path du path qu'il va devoir prendre divisée par (taille du cluster + 1)
+                # cost_matrix[i, j] = self.path_distance(self.grid.compute_safest_path(
+                #     self.grid._conv_world_to_grid(*drone_pos),
+                #     cell_centroid,
+                #     self.path_params.max_inflation_obstacle
+                # )) /( (cluster.size()) + 1)
+                cost_matrix[i,j] = math.dist(self.grid._conv_world_to_grid(*drone_pos),cell_centroid)
+                # cost_matrix[i,j] = self.path_distance(self.grid.compute_safest_path(
+                #     self.grid._conv_world_to_grid(*drone_pos),
+                #     cell_centroid,
+                #     0
+                # ))
+                # #print(cost_matrix[i, j])
         # 5. Affectation via l'algorithme hongrois
         row_ind, col_ind = linear_sum_assignment(cost_matrix)
         assignments = {drone_ids[r]: clusters[col_ind[r]] for r in range(len(row_ind))}
@@ -317,36 +333,38 @@ class MyDroneFrontex(DroneAbstract):
 
         return assignments[self.identifier]
 
-    def plan_path_to_frontier(self):
-        if self.grid.closest_largest_frontier(self.estimated_pose) is not None:
-            self.next_frontier, self.next_frontier_centroid = self.grid.closest_largest_frontier(self.estimated_pose)
-            if self.next_frontier_centroid is not None:
-                start_cell = self.grid._conv_world_to_grid(*self.estimated_pose.position)
-                target_cell = self.next_frontier_centroid
-                max_inflation = self.path_params.max_inflation_obstacle
+    # def plan_path_to_frontier(self):
+    #     if self.grid.closest_largest_frontier(self.estimated_pose) is not None:
+    #         self.next_frontier, self.next_frontier_centroid = self.grid.closest_largest_frontier(self.estimated_pose)
+    #         if self.next_frontier_centroid is not None:
+    #             start_cell = self.grid._conv_world_to_grid(*self.estimated_pose.position)
+    #             target_cell = self.next_frontier_centroid
+    #             max_inflation = self.path_params.max_inflation_obstacle
 
-                self.path = self.grid.compute_safest_path(start_cell, target_cell, max_inflation)
-                print(self.path)
-                if self.path is None:   # The frontier is unreachable, probably due to artifacts of FREE zones inside boxes set in the mapping process
-                    print(self.next_frontier.cells)
-                    #self.grid.delete_frontier_artifacts(self.next_frontier)
-                else:
-                    self.indice_current_waypoint = 0
+    #             self.path = self.grid.compute_safest_path(start_cell, target_cell, max_inflation)
+    #             print(self.path)
+    #             if self.path is None:   # The frontier is unreachable, probably due to artifacts of FREE zones inside boxes set in the mapping process
+    #                 print(self.next_frontier.cells)
+    #                 #self.grid.delete_frontier_artifacts(self.next_frontier)
+    #             else:
+    #                 self.indice_current_waypoint = 0
 
-        else:
-            self.explored_all_frontiers = True
+    #     else:
+    #         self.explored_all_frontiers = True
 
     def plan_path_to_frontier(self):
         assigned_cluster = self.assign_frontier_cluster()
+        #print(f"Assigned cluster: {assigned_cluster}")
         if assigned_cluster is not None:
-            self.next_frontier_centroid = assigned_cluster["centroid"]
+            self.next_frontier = assigned_cluster
+            self.next_frontier_centroid = assigned_cluster.point_closest_to_centroid()
             start_cell = self.grid._conv_world_to_grid(*self.estimated_pose.position)
             target_cell = self.next_frontier_centroid
             max_inflation = self.path_params.max_inflation_obstacle
             self.path = self.grid.compute_safest_path(start_cell, target_cell, max_inflation)
             if self.path is None:
                 print("Assigned frontier unreachable, deleting artifacts.")
-                self.grid.delete_frontier_artifacts(self.next_frontier)
+                #self.grid.delete_frontier_artifacts(self.next_frontier)
                 #self.state = self.State.SEARCHING_WALL
             else:
                 self.indice_current_waypoint = 0
@@ -363,7 +381,8 @@ class MyDroneFrontex(DroneAbstract):
         """
 
         for _,broadcast_loc in self.wounded_locked :
-            distance = np.linalg.norm(np.array(self.estimated_pose.position) - np.array(broadcast_loc))
+            distance = math.dist(self.grid._conv_world_to_grid(*self.estimated_pose.position),self.grid._conv_world_to_grid(*broadcast_loc))
+            # distance = np.linalg.norm(np.array(self.estimated_pose.position) - np.array(broadcast_loc))
             if distance < threshold:
                 print("Near a rescuing drone")
                 return True
@@ -487,17 +506,24 @@ class MyDroneFrontex(DroneAbstract):
         return False
 
     def follow_path(self,path,found_and_near_wounded):
-        if self.is_near_waypoint(path[self.indice_current_waypoint]):
-            self.indice_current_waypoint += 1 # next point in path
-            #print(f"Waypoint reached {self.indice_current_waypoint}")
-            if self.indice_current_waypoint >= len(path):
-                self.finished_path = True # NOT USE YET
-                self.indice_current_waypoint = 0
-                self.path = []
-                self.path_grid = []
-                return
-        
-        return self.go_to_waypoint(path[self.indice_current_waypoint][0],path[self.indice_current_waypoint][1],found_and_near_wounded)
+        if path is None :
+            self.finished_path = True # NOT USE YET
+            self.indice_current_waypoint = 0
+            self.path = []
+            self.path_grid = []
+            return 
+        else : 
+            if self.is_near_waypoint(path[self.indice_current_waypoint]):
+                self.indice_current_waypoint += 1 # next point in path
+                #print(f"Waypoint reached {self.indice_current_waypoint}")
+                if self.indice_current_waypoint >= len(path):
+                    self.finished_path = True # NOT USE YET
+                    self.indice_current_waypoint = 0
+                    self.path = []
+                    self.path_grid = []
+                    return
+            
+            return self.go_to_waypoint(path[self.indice_current_waypoint][0],path[self.indice_current_waypoint][1],found_and_near_wounded)
 
     def go_to_waypoint(self,x,y,found_and_near_wounded):
         
@@ -600,11 +626,10 @@ class MyDroneFrontex(DroneAbstract):
         self.previous_position.append(self.estimated_pose.position)
         self.previous_orientation.append(self.estimated_pose.orientation)
         
-
         self.grid.update(pose=self.estimated_pose)
         
         if display and (self.timestep_count % 5 == 0):
-             self.grid.display(self.grid.zoomed_grid,
+             self.grid.display(self.grid.to_ternary_map(),
                                self.estimated_pose,
                                title=f"Drone {self.identifier} zoomed occupancy grid")
 
@@ -669,15 +694,26 @@ class MyDroneFrontex(DroneAbstract):
             self.draw_path(self.path)
 
         if self.state == self.State.EXPLORING_FRONTIERS:
-            if self.visualisation_params.draw_frontier_centroid and self.next_frontier_centroid is not None:
-                self.draw_point(self.grid._conv_grid_to_world(*self.next_frontier_centroid) + self._half_size_array)     # frame of reference change
             
             if self.visualisation_params.draw_frontier_points and self.next_frontier is not None:
-                for point in self.next_frontier.cells:
-                    self.draw_point(self.grid._conv_grid_to_world(*point) + self._half_size_array, color=arcade.color.AIR_FORCE_BLUE)     # frame of reference change
+                #print("VISUALISING")
+                colors = [arcade.color.RED, arcade.color.BLUE, arcade.color.GREEN, arcade.color.YELLOW, arcade.color.ORANGE, arcade.color.PURPLE]
+                for i,f in enumerate(self.grid.frontiers):
+                    for cell in f.cells :
+                        point = self.grid._conv_grid_to_world(*cell) + self._half_size_array
+                        self.draw_point(point, color=colors[i % len(colors)])
+
+            if self.visualisation_params.draw_frontier_centroid and self.next_frontier_centroid is not None:
+                self.draw_point(self.grid._conv_grid_to_world(*self.next_frontier_centroid) + self._half_size_array)     # frame of reference change
 
     def visualise_actions(self):
         """
         It's mandatory to use draw_top_layer to draw anything on the interface
         """
         self.draw_top_layer()
+
+    def path_distance(self,path) :
+        if path is None: 
+            return 100000
+        diff = [math.dist(path[i+1],path[i]) for i in range(len(path)-1)]
+        return np.sum(diff)

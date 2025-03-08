@@ -30,14 +30,22 @@ class OccupancyGrid(Grid):
             """
             self.cells = cells
 
-        def compute_centroid(self):
+        def centroid(self):
             """
             Compute the centroid of the frontier.
             """
             if self.cells.size == 0:
                 return None
-            x_coords, y_coords = zip(*self.cells)
-            return np.array([sum(x_coords) / len(x_coords), sum(y_coords) / len(y_coords)], dtype=int)
+            return np.mean(self.cells, axis=0).astype(int)
+
+            # x_coords, y_coords = zip(*self.cells)
+            # return np.array([sum(x_coords) / len(x_coords), sum(y_coords) / len(y_coords)], dtype=int)
+
+        def point_closest_to_centroid(self):
+            "compute the cell closest to the centroid"
+            if self.cells.size == 0:
+                return None
+            return self.cells[np.argmin(np.linalg.norm(self.cells - self.centroid(), axis=1))]
 
         def size(self):
             """
@@ -94,17 +102,19 @@ class OccupancyGrid(Grid):
 
         ternary_map = np.zeros_like(self.grid, dtype=int)
         ternary_map[self.grid > OBSTACLE_THRESHOLD] = self.OBSTACLE
-        ternary_map[self.grid < FREE_THRESHOLD] = self.FREE
-        ternary_map[self.grid == 0] = self.UNDISCOVERED
+        ternary_map[self.grid <= FREE_THRESHOLD] = self.FREE
+        ternary_map[abs(self.grid) <=  OBSTACLE_THRESHOLD] = self.UNDISCOVERED
         return ternary_map
 
     def to_median_map(self):
         median_map = np.zeros_like(self.grid,dtype=int)
         copy = np.float32(self.grid)
         filtered = cv2.medianBlur(copy,3,)
-        seuil = 2
+
+        seuil = 4
         median_map[filtered > seuil] = self.OBSTACLE
-        median_map[abs(filtered) <= 0] = self.UNDISCOVERED 
+        median_map[filtered< -seuil] = self.FREE
+        median_map[ abs(filtered) <= seuil] = self.UNDISCOVERED 
         return median_map
         
 
@@ -191,66 +201,63 @@ class OccupancyGrid(Grid):
                            int(self.size_area_world[0] * 0.5))
         self.zoomed_grid = cv2.resize(self.zoomed_grid, new_zoomed_size,
                                       interpolation=cv2.INTER_NEAREST)
-        #return to_update
-
-    # def update(self, to_update):
-    #     """
-    #     Bayesian map update with new observation
-    #     lidar : lidar data
-    #     pose : corrected pose in world coordinates
-    #     """
-    #     THRESHOLD_MIN = GridParams.THRESHOLD_MIN
-    #     THRESHOLD_MAX = GridParams.THRESHOLD_MAX
-
-    #     for message in to_update:
-    #         # Ensure the message is a valid DroneMessage instance
-    #         if not isinstance(message, DroneMessage):
-    #             raise ValueError("Invalid message type. Expected a DroneMessage instance.")
-
-    #         code = message.code
-    #         arg = message.arg
-
-    #         if code == DroneMessage.Code.LINE:
-    #             self.add_value_along_line(*arg)
-    #         elif code == DroneMessage.Code.POINTS:
-    #             self.add_points(*arg)
-    #         else:
-    #             raise ValueError(f"Unknown code in DroneMessage: {code}")
-
-    #     # Threshold values in the grid
-
-
-    #     # # Restore the initial cell value # That could have been set to free or empty
-    #     # if self.initial_cell and self.initial_cell_value is not None:
-    #     #     cell_x, cell_y = self.initial_cell
-    #     #     if 0 <= cell_x < self.x_max_grid and 0 <= cell_y < self.y_max_grid:
-    #     #         self.grid[cell_x, cell_y] = self.initial_cell_value
-
-    #     # compute zoomed grid for displaying
-    #     self.zoomed_grid = self.grid.copy()
-
-    #     new_zoomed_size = (int(self.size_area_world[1] * 0.5),
-    #                        int(self.size_area_world[0] * 0.5))
-    #     self.zoomed_grid = cv2.resize(self.zoomed_grid, new_zoomed_size,
-    #                                   interpolation=cv2.INTER_NEAREST)
 
     def frontiers_update(self):
+                # Get the ternary map (FREE = 0, UNDISCOVERED = -2, OBSTACLE = 1)
         ternary_map = self.to_ternary_map()
+        rows, cols = ternary_map.shape
 
-        # Différences sur les axes X et Y
-        diff_x = np.diff(ternary_map, axis=1)
-        diff_y = np.diff(ternary_map, axis=0)
+        # Parameter: number of cells to look ahead past the unknown cell
+        threshold = 2  # adjust this value as needed
 
-        # Détection des frontières entre FREE et UNDISCOVERED
-        boundaries_x = np.abs(diff_x) == 2
-        boundaries_y = np.abs(diff_y) == 2
+        # Create a boolean mask for valid frontier cells
+        frontier_mask = np.zeros_like(ternary_map, dtype=bool)
 
-        # Combinaison des résultats
-        boundaries_map = np.pad(boundaries_x, ((0, 0), (0, 1))) | np.pad(boundaries_y, ((0, 1), (0, 0)))
+        # Define directions for 4-connected neighborhood (adjust to 8-connected if desired)
+        directions = [(0, 1), (1, 0), (0, -1), (-1, 0)]
 
-        labeled_array, num_features = label(boundaries_map, self.frontier_connectivity_structure)
+        # Loop over every cell in the map
+        for i in range(rows):
+            for j in range(cols):
+                # Only consider free cells
+                if ternary_map[i, j] != 0:
+                    continue
 
-        # Extraction des points de chaque frontière
+                candidate_found = False
+                valid_candidate = True
+
+                # Check each neighboring cell in the defined directions
+                for di, dj in directions:
+                    ni, nj = i + di, j + dj
+                    # Check bounds
+                    if ni < 0 or ni >= rows or nj < 0 or nj >= cols:
+                        continue
+
+                    # Look for an unknown neighbor
+                    if ternary_map[ni, nj] == -2:
+                        candidate_found = True
+                        # Look ahead beyond the unknown cell up to the threshold
+                        for step in range(1, threshold + 1):
+                            check_i = i + di * (step + 1)
+                            check_j = j + dj * (step + 1)
+                            # If out-of-bounds, we stop checking this direction
+                            if check_i < 0 or check_i >= rows or check_j < 0 or check_j >= cols:
+                                break
+                            # If an obstacle is encountered within the threshold, reject the candidate
+                            if ternary_map[check_i, check_j] == 1:
+                                valid_candidate = False
+                                break
+                        if not valid_candidate:
+                            break
+
+                # Mark the cell as a valid frontier if it touches unknown and passes the extended check
+                if candidate_found and valid_candidate:
+                    frontier_mask[i, j] = True
+
+        # Label connected regions in the frontier mask using the provided connectivity structure
+        labeled_array, num_features = label(frontier_mask, self.frontier_connectivity_structure)
+
+        # Extract points from each connected component and filter by minimum frontier size
         frontiers = [np.argwhere(labeled_array == i) for i in range(1, num_features + 1)]
         self.frontiers = [self.Frontier(cells) for cells in frontiers if len(cells) >= self.Frontier.MIN_FRONTIER_SIZE]
 
@@ -276,12 +283,8 @@ class OccupancyGrid(Grid):
             if label_val == -1:  # Noise
                 continue
             cluster_points = all_frontier_cells[labels == label_val]
-            centroid = np.mean(cluster_points, axis=0).astype(int)
-            clusters.append({
-                "centroid": centroid,
-                "points": cluster_points,
-                "size": len(cluster_points)
-            })
+            new_frontier = self.Frontier(cluster_points)
+            clusters.append(new_frontier)
         return clusters
 
     def delete_frontier_artifacts(self, frontier):
@@ -304,7 +307,7 @@ class OccupancyGrid(Grid):
 
         pos_drone_grid = np.array(self._conv_world_to_grid(*pose.position))
         frontiers_with_size = [
-            (frontier, frontier.compute_centroid(), frontier.size()) for frontier in self.frontiers
+            (frontier, frontier.centroid(), frontier.size()) for frontier in self.frontiers
         ]
         
         def interest_measure(frontier_data):
