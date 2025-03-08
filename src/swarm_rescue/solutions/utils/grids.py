@@ -169,11 +169,12 @@ class OccupancyGrid(Grid):
         # the current position of the drone is free !
         self.add_points(pose.position[0], pose.position[1], FREE_ZONE_VALUE)
     
-    def update_with_communication(self, list_communicated_grids, other_drones_poses):
-        for communicated_grid in list_communicated_grids:
-            # Add only the communicated grid information that is not already known
-            unexplored_mask = (self.grid == 0)
-            self.grid += communicated_grid * unexplored_mask
+    def update_with_communication(self, other_drones_grids, other_drones_poses):
+        # Add only the communicated grid information that is not already known
+        unexplored_mask = (self.grid == 0)
+        for communicated_grid in other_drones_grids:
+            if communicated_grid is not None:
+                self.grid += communicated_grid * unexplored_mask
         
         # the current position of other drone is free ! Also balances the issue that drone are considered obstacles by the lidar
         for pose in other_drones_poses:

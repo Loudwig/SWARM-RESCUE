@@ -106,4 +106,10 @@ class GridParams:
 
 @dataclass
 class CommunicationParams:
-    map_communication_minimum_interval: int = 50    # in timesteps
+    map_communication_start_timestep: int = 3500
+    map_communication_minimum_interval: int = 300    # in timesteps
+
+@dataclass
+class StrategyParams:
+    id_always_at_return_area: int = None
+    id_always_exploring: int = 1
