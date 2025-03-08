@@ -76,8 +76,8 @@ class Launcher:
 
         """IF YOU WANT SPECIAL ZONES"""
 
-        zones_config: ZonesConfig = (ZoneType.NO_COM_ZONE, ZoneType.NO_GPS_ZONE, ZoneType.KILL_ZONE)
-        eval_config = EvalConfig(map_type=MyMapFinal2022_23,zones_config=zones_config, nb_rounds=1)
+        #zones_config: ZonesConfig = (ZoneType.NO_COM_ZONE, ZoneType.NO_GPS_ZONE, ZoneType.KILL_ZONE)
+        eval_config = EvalConfig(map_type=MyMapFinal2022_23,zones_config=None, nb_rounds=1)
 
         """IF YOU WANT NO SPECIAL ZONES"""
         # eval_config = EvalConfig(map_type=MyMapbox, nb_rounds=1)

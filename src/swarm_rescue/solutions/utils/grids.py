@@ -339,6 +339,12 @@ class OccupancyGrid(Grid):
         
         return None
 
+    def path_distance(self, path) :
+        if path is None:
+            return 100000
+        diff = [math.dist(path[i+1],path[i]) for i in range(len(path)-1)]
+        return np.sum(diff)
+
     def simplify_path(self, path, MAP):
         path_simplified = simplify_collinear_points(path)
         path_line_of_sight = simplify_by_line_of_sight(path_simplified, MAP)

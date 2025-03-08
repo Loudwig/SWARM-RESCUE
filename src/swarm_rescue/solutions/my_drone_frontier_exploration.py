@@ -27,6 +27,9 @@ from solutions.utils.dataclasses_config import *
 
 from scipy.optimize import linear_sum_assignment
 
+from swarm_rescue.solutions.utils.astar import can_go_straight
+from swarm_rescue.solutions.utils.dataclasses_config import GraspingParams
+
 
 class MyDroneFrontex(DroneAbstract):
     class State(Enum):
@@ -173,15 +176,15 @@ class MyDroneFrontex(DroneAbstract):
             return 0.5
     
     def control(self):
-        inKillZone =self.lidar().get_sensor_values() is None 
+        inKillZone =self.lidar().get_sensor_values() is None or self._drone_health<=0
 
         if not inKillZone : 
 
             self.timestep_count += 1
             self.history_health.append(self._drone_health)
             
+            #if self.state not in [self.State.SEARCHING_RESCUE_CENTER,self.State.GOING_RESCUE_CENTER]:
             self.mapping(display=self.mapping_params.display_map)
-            
             
             self.communication_management()
 
@@ -189,7 +192,7 @@ class MyDroneFrontex(DroneAbstract):
             found_wall, epsilon_wall_angle, min_dist = self.process_lidar_sensor(self.lidar())
             found_wounded, found_rescue_center, score_wounded, epsilon_wounded, epsilon_rescue_center, is_near_rescue_center,min_dist_wnd = self.process_semantic_sensor()
 
-            is_near_rescuing_drone = self.check_near_rescuing_drone(threshold=60.0)
+            is_near_rescuing_drone = self.check_near_rescuing_drone(threshold=GraspingParams.hampering_dist)
             if is_near_rescuing_drone:
                 print("Hampering a rescue, waiting...")
 
@@ -204,7 +207,7 @@ class MyDroneFrontex(DroneAbstract):
                 self.State.GRASPING_WOUNDED: lambda: self.handle_grasping_wounded(min_dist_wnd, epsilon_wounded),
                 self.State.SEARCHING_RESCUE_CENTER: self.handle_searching_rescue_center,
                 self.State.GOING_RESCUE_CENTER: lambda: self.handle_going_rescue_center(epsilon_rescue_center, is_near_rescue_center),
-                self.State.EXPLORING_FRONTIERS: self.handle_exploring_frontiers,
+                self.State.EXPLORING_FRONTIERS: lambda: self.handle_exploring_frontiers(is_near_rescue_center),
             }
 
             # print(self.identifier, self.state)
@@ -266,9 +269,9 @@ class MyDroneFrontex(DroneAbstract):
 
         return command
 
-    def handle_exploring_frontiers(self):
+    def handle_exploring_frontiers(self,is_near_rescue_center):
         if self.finished_path:
-            self.plan_path_to_frontier()
+            self.plan_path_to_frontier(is_near_rescue_center)
             self.finished_path = False
 
         if self.explored_all_frontiers or self.path is None:
@@ -276,7 +279,7 @@ class MyDroneFrontex(DroneAbstract):
         else:
             return self.follow_path(self.path, found_and_near_wounded=False)
 
-    def assign_frontier_cluster(self):
+    def assign_frontier_cluster(self, is_near_rescue_center):
         """
         Utilise DBSCAN pour regrouper les points frontaliers et assigne
         les clusters aux drones via l'algorithme hongrois.
@@ -313,7 +316,16 @@ class MyDroneFrontex(DroneAbstract):
                 #     cell_centroid,
                 #     self.path_params.max_inflation_obstacle
                 # )) /( (cluster.size()) + 1)
-                cost_matrix[i,j] = math.dist(self.grid._conv_world_to_grid(*drone_pos),cell_centroid)
+                if is_near_rescue_center:
+                    cost_matrix[i, j] = math.dist(self.grid._conv_world_to_grid(*drone_pos), cell_centroid)
+                else:
+                    own_cell = self.grid._conv_world_to_grid(*drone_pos)
+                    target_cell = self.grid._conv_world_to_grid(*cell_centroid)
+                    if can_go_straight(*own_cell, *target_cell, self.grid.to_ternary_map()):
+                        cost_matrix[i, j] = math.dist(self.grid._conv_world_to_grid(*drone_pos), cell_centroid)
+                    else:
+                        cost_matrix[i, j] = math.dist(self.grid._conv_world_to_grid(*drone_pos), cell_centroid)**2
+
                 # cost_matrix[i,j] = self.path_distance(self.grid.compute_safest_path(
                 #     self.grid._conv_world_to_grid(*drone_pos),
                 #     cell_centroid,
@@ -352,8 +364,8 @@ class MyDroneFrontex(DroneAbstract):
     #     else:
     #         self.explored_all_frontiers = True
 
-    def plan_path_to_frontier(self):
-        assigned_cluster = self.assign_frontier_cluster()
+    def plan_path_to_frontier(self, is_near_rescue_center):
+        assigned_cluster = self.assign_frontier_cluster(is_near_rescue_center)
         #print(f"Assigned cluster: {assigned_cluster}")
         if assigned_cluster is not None:
             self.next_frontier = assigned_cluster
@@ -381,9 +393,20 @@ class MyDroneFrontex(DroneAbstract):
         """
 
         for _,broadcast_loc in self.wounded_locked :
-            distance = math.dist(self.grid._conv_world_to_grid(*self.estimated_pose.position),self.grid._conv_world_to_grid(*broadcast_loc))
+            #start_cell = self.grid._conv_world_to_grid(*self.estimated_pose.position)
+            #target_cell = self.grid._conv_world_to_grid(*broadcast_loc)
+            #max_inflation = self.path_params.max_inflation_obstacle
+            #path_to_drone = self.grid.compute_safest_path(start_cell, target_cell, max_inflation)
+            #if path_to_drone is not None:
+                #distance = self.grid.path_distance(path_to_drone)
+                #print("distance a*",distance)
+            #else:
+                #distance = math.dist(self.grid._conv_world_to_grid(*self.estimated_pose.position),self.grid._conv_world_to_grid(*broadcast_loc))
+            own_cell = self.grid._conv_world_to_grid(*self.estimated_pose.position)
+            other_cell = self.grid._conv_world_to_grid(*broadcast_loc)
+            distance = math.dist(own_cell,other_cell)
             # distance = np.linalg.norm(np.array(self.estimated_pose.position) - np.array(broadcast_loc))
-            if distance < threshold:
+            if distance < threshold and can_go_straight(*own_cell,*other_cell,self.grid.to_ternary_map()):
                 print("Near a rescuing drone")
                 return True
         return False
@@ -425,7 +448,7 @@ class MyDroneFrontex(DroneAbstract):
                 dy = score[2] * math.sin(score[1] + self.estimated_pose.orientation)
                 detection_position = np.array(self.estimated_pose.position) + np.array([dx, dy])
                 conflict = False
-                if np.linalg.norm(detection_position - np.array(wnd_locked[1])) < 20.0 : # adjust threshold as needed
+                if np.linalg.norm(detection_position - np.array(wnd_locked[1])) < GraspingParams.hampering_dist : # adjust threshold as needed
                     conflict = True
                     print("Conflict of wounded")
                     break
@@ -712,8 +735,3 @@ class MyDroneFrontex(DroneAbstract):
         """
         self.draw_top_layer()
 
-    def path_distance(self,path) :
-        if path is None: 
-            return 100000
-        diff = [math.dist(path[i+1],path[i]) for i in range(len(path)-1)]
-        return np.sum(diff)
