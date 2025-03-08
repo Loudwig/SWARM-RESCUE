@@ -45,21 +45,13 @@ class ManagingCollisionParams:
 
 @dataclass
 class PIDParams:
-    Kp_angle: float = 4 / math.pi
-    Kp_angle_1: float = 9 / math.pi
+    Kp_angle: float = 9 / math.pi
     Kd_angle: float = Kp_angle / 10
-    Kd_angle_1: float = Kp_angle / 10
     Ki_angle: float = (1 / 10) * (1 / 20) * 2 / math.pi
     
-    Kp_distance: float = 2 / abs(WallFollowingParams.dmax - WallFollowingParams.dist_to_stay)
-    Kp_distance_1 : float = 2 / abs(10)
-    Ki_distance: float = 1 / abs(WallFollowingParams.dist_to_stay) * 1 / 200
-    Ki_distance_1: float = 1 / abs(10) * 1 / 20 * 1 / 10
+    Kp_distance : float = 2 / abs(10)
+    Ki_distance: float = 1 / abs(10) * 1 / 20 * 1 / 10
     Kd_distance: float = 2 * Kp_distance
-    Kd_distance_1: float = 2 * Kp_distance_1
-
-    Kp_distance_2: float = 10
-    Kd_distance_2: float = 0.01
 
 @dataclass
 class PathParams:
