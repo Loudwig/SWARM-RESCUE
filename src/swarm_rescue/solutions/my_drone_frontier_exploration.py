@@ -264,7 +264,7 @@ class MyDroneFrontex(DroneAbstract):
         command = self.pid_controller(command, epsilon_rescue_center, self.pid_params.Kp_angle, self.pid_params.Kd_angle, self.pid_params.Ki_angle, self.past_ten_errors_angle, "rotation")
 
         if is_near_rescue_center:
-            command["forward"] = 0.0
+            command["forward"] = -0.5
             command["rotation"] = 1.0  # Rotate in place to drop off
 
         return command
