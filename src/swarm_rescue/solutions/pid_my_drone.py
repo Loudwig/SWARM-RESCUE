@@ -8,6 +8,8 @@ import math
 from typing import List, Optional
 import numpy as np
 import arcade
+import csv
+import os
 
 from spg_overlay.entities.drone_abstract import DroneAbstract
 from spg_overlay.utils.misc_data import MiscData
@@ -19,6 +21,9 @@ from solutions.utils.messages import *
 from solutions.utils.grids import *
 from solutions.utils.dataclasses_config import *
 from solutions.utils.exploration_tracker import *
+
+# Paths
+import path_creator.path1
 
 class MyDronePID(DroneAbstract):
     class State(Enum):
@@ -54,38 +59,20 @@ class MyDronePID(DroneAbstract):
         self.indice_current_waypoint = 0
         self.inital_point_path = (0,0)
         self.finished_path = False
-##########################################################
-        self.path = self.path = [
-    (-332, 263),# Starting point
-    (-78, 238),
-    (211, 243),
-    (348, 166),
-    (359, -157),
-    (191, -273),
-    (-144, -254),
-    (-306, -162),
-    (-336, 41),
-    (-216, 134),
-    (18, 166),
-    (171, 147),
-    (279, 31),
-    (277, -118),
-    (-52, -165),
-    (-150, -67),
-    (-151, 24),
-    (16, 70),
-    (137, 25),
-    (96, -48),
-    (-25, -47),
-]
-##########################################################
+###########################PATH CHOICE##########################
+        self.path = path_creator.path1.path
+###########################PATH CHOICE##########################
         self.path_grid = []
 
         # TIME
         self.timestep_count = 0
 
         # LOG PARAMS
-        self.log_params = LogParams()   
+        self.id_log_file = input("Write a number for the log files")
+        self.log_params = LogParams()
+        self.serialize_PID_params()
+        self.epsilon_angle = 0
+        self.epsilon_lateral = 0
 
         # GRAPHICAL INTERFACE
         self.visualisation_params = VisualisationParams()
@@ -100,7 +87,47 @@ class MyDronePID(DroneAbstract):
 
         self.visualise_actions()
 
+        self.log_pid_values()
+
         return self.follow_path(self.path)
+    
+    def log_pid_values(self):
+        """Log PID error values to a CSV file at each timestep"""
+        log_dir = "logs"
+        
+        # Define CSV file path
+        csv_file = os.path.join(log_dir, f"{self.id_log_file}_pid_values_drone.csv")
+        
+        # Create file with headers if it doesn't exist
+        if not os.path.exists(csv_file):
+            with open(csv_file, 'w', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow(['timestep', 'epsilon_angle', 'epsilon_lateral'])
+        
+        # Append values
+        with open(csv_file, 'a', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow([self.timestep_count, self.epsilon_angle, self.epsilon_lateral])
+
+    def serialize_PID_params(self):
+        """Serialize PIDParams to CSV file"""
+        log_dir = "logs"
+        
+        csv_file = os.path.join(log_dir, f"{self.id_log_file}_pid_params_drone.csv")
+        
+        # Get all attributes from LogParams
+        params_dict = self.pid_params.__dict__
+        
+        # Create/write headers if file doesn't exist
+        if not os.path.exists(csv_file):
+            with open(csv_file, 'w', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow(list(params_dict.keys()))
+        
+        # Write values
+        with open(csv_file, 'a', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(list(params_dict.values()))
 
     # Takes the current relative error and with a PID controller, returns the command
     # mode : "rotation" or "lateral" for now could be speed or other if implemented
@@ -110,8 +137,10 @@ class MyDronePID(DroneAbstract):
         past_ten_errors.append(epsilon)
         if mode == "rotation":
             epsilon = normalize_angle(epsilon)
+            self.epsilon_angle = epsilon
             deriv_epsilon = normalize_angle(self.odometer_values()[2])
         elif mode == "lateral":
+            self.epsilon_lateral = epsilon
             deriv_epsilon = -np.sin(self.odometer_values()[1])*self.odometer_values()[0] # vitesse latérale
         elif mode == "forward" : 
             deriv_epsilon = self.odometer_values()[0]*np.cos(self.odometer_values()[1]) # vitesse longitudinale
@@ -177,43 +206,7 @@ class MyDronePID(DroneAbstract):
 
         return command_path
 
-    # Use this function only at one place in the control method. Not handled othewise.
-    # params : variables_to_log : dict of variables to log with keys as variable names and values as variable values.
-    def logging_variables(self, variables_to_log):
-        """
-        Buffers and logs variables to the log file when the buffer reaches the flush interval.
-
-        :param variables_to_log: dict of variables to log with keys as variable names 
-                                and values as variable values.
-        """
-        if not self.log_params.record_log:
-            return
-
-        # Initialize the log buffer if not already done
-        if not hasattr(self, "log_buffer"):
-            self.log_buffer = []
-
-        # Append the current variables to the buffer
-        log_entry = {"Timestep": self.timestep_count, **variables_to_log}
-        self.log_buffer.append(log_entry)
-
-        # Write the buffer to file when it reaches the flush interval
-        if len(self.log_buffer) >= self.log_params.flush_interval:
-            mode = "w" if not self.log_initialized else "a"
-            with open(self.log_params.log_file, mode) as log_file:
-                # Write the header if not initialized
-                if not self.log_initialized:
-                    headers = ",".join(log_entry.keys())
-                    log_file.write(headers + "\n")
-                    self.log_initialized = True
-
-                # Write buffered entries
-                for entry in self.log_buffer:
-                    line = ",".join(map(str, entry.values()))
-                    log_file.write(line + "\n")
-
-            # Clear the buffer
-            self.log_buffer.clear()
+    
 
     def draw_path(self, path):
         length = len(path)
