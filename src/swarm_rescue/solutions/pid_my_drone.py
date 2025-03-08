@@ -20,30 +20,12 @@ from solutions.utils.grids import *
 from solutions.utils.dataclasses_config import *
 from solutions.utils.exploration_tracker import *
 
-class MyDroneFrontex(DroneAbstract):
+class MyDronePID(DroneAbstract):
     class State(Enum):
         """
         All the states of the drone as a state machine
         """
-        WAITING = auto()    # Assigns 1
-
-        SEARCHING_WALL = auto()     # Assigns 2 etc ... This allows to easily add new states
-        FOLLOWING_WALL = auto()
-
-        EXPLORING_FRONTIERS = auto()
-
-        PATH_TO_WOUNDED = auto()
-        GOING_TO_WOUNDED = auto()
-        SEARCHING_RESCUE_CENTER = auto()
-        GOING_RESCUE_CENTER = auto()
-
-        SEARCHING_RETURN_AREA = auto()
-        GOING_RETURN_AREA = auto()
-
-        MANAGING_COLLISION = auto()
-
-        ALWAYS_EXPLORING_FRONTIERS = auto()
-        ALWAYS_AT_RETURN_AREA = auto()
+        FOLLOWING_PATH = auto()
 
     def __init__(self,
                  identifier: Optional[int] = None,
@@ -53,15 +35,7 @@ class MyDroneFrontex(DroneAbstract):
                          misc_data=misc_data,
                          **kwargs)
         
-        # MAPPING
-        self.mapping_params = MappingParams()
-        self.estimated_pose = Pose() 
-        self.grid = OccupancyGrid(size_area_world=self.size_area,
-                                  resolution=self.mapping_params.resolution,
-                                  lidar=self.lidar(),semantic=self.semantic())
-        
-        # EXPLORATION TRACKING
-        self.exploration_tracker = ExplorationTracker()
+        self.estimated_pose = Pose()
 
         # POSITION
         self.previous_position = deque(maxlen=1) 
@@ -69,28 +43,8 @@ class MyDroneFrontex(DroneAbstract):
         self.previous_orientation = deque(maxlen=1) 
         self.previous_orientation.append(0) 
 
-        # STATE INITIALISATION
-        self.state_initialisation()
-
-        # PARAMS FOR DIFFERENT STATES 
-
-            # WAITING STATE
-        self.waiting_params = WaitingStateParams()
-        self.step_waiting_count = 0
-
-            # WOUNDED RESCUE
-        self.wounded_rescue_params = WoundedRescueParams()
-        self.need_to_grasp = False
-
-            # WALL FOLLOWING
-        self.wall_following_params = WallFollowingParams()
-
-            # FRONTIER EXPLORATION
-        self.explored_all_frontiers = False
-        self.next_frontier = None
-        self.next_frontier_centroid = None
-
         # PID PARAMS
+        self.wall_following_params = WallFollowingParams()
         self.pid_params = PIDParams()
         self.past_ten_errors_angle = [0] * 10
         self.past_ten_errors_distance = [0] * 10
@@ -99,20 +53,33 @@ class MyDroneFrontex(DroneAbstract):
         self.path_params = PathParams()
         self.indice_current_waypoint = 0
         self.inital_point_path = (0,0)
-        self.finished_path = True
-        self.path = []
+        self.finished_path = False
+##########################################################
+        self.path = self.path = [
+    (-332, 263),# Starting point
+    (-78, 238),
+    (211, 243),
+    (348, 166),
+    (359, -157),
+    (191, -273),
+    (-144, -254),
+    (-306, -162),
+    (-336, 41),
+    (-216, 134),
+    (18, 166),
+    (171, 147),
+    (279, 31),
+    (277, -118),
+    (-52, -165),
+    (-150, -67),
+    (-151, 24),
+    (16, 70),
+    (137, 25),
+    (96, -48),
+    (-25, -47),
+]
+##########################################################
         self.path_grid = []
-
-        # COLLISION PARAMS
-        self.managing_collision_command = {"forward": -0.2, "lateral": 0.5, "rotation": 0.0}
-        self.managing_collision_timestep_count = 0
-
-        # COMMUNICATION
-        self.new_received_message_batches: List[DroneMessageBatch] = []
-        self.timestep_last_hearing = [0] * 10
-        self.timestep_last_incorporating_grid = [0] * 10
-        self.other_drones_poses: List[Optional[Pose]] = [None] * 10 # Only values other than None are accurate (because they are recent)
-        self.other_drones_grids: List[Optional[np.array]] = [None] * 10
 
         # TIME
         self.timestep_count = 0
@@ -123,320 +90,17 @@ class MyDroneFrontex(DroneAbstract):
         # GRAPHICAL INTERFACE
         self.visualisation_params = VisualisationParams()
 
-    def state_initialisation(self):
-        if self.identifier == StrategyParams.id_always_exploring:
-            self.state = self.State.ALWAYS_EXPLORING_FRONTIERS
-            self.previous_state = self.State.ALWAYS_EXPLORING_FRONTIERS
-
-        if self.identifier == StrategyParams.id_always_at_return_area:
-            self.state = self.State.ALWAYS_AT_RETURN_AREA
-            self.previous_state = self.State.ALWAYS_AT_RETURN_AREA
-
-        else:
-            self.state = self.State.WAITING
-            self.previous_state = self.State.WAITING
-    
-    def reset_exploration_path_params(self):
-        """
-        Resets the parameters related to the exploration path.
-        """
-        self.next_frontier = None
-        self.next_frontier_centroid = None
-        self.finished_path = True
-        self.path = []
-    
-    def time_steps_since_hearing(self, drone_id):
-        return self.timestep_count - self.timestep_last_hearing[drone_id]
-
-    def time_steps_since_incorporating_grid(self, drone_id):
-        return self.timestep_count - self.timestep_last_incorporating_grid[drone_id]
-    
-    def reset_other_drones_poses(self):
-        self.other_drones_poses = [None] * 10
-
-    def reset_other_drones_grids(self):
-        self.other_drones_grids = [None] * 10
-
-    def detect_collision(self):
-        """Returns True if there's a collision with another drone"""
-        collided = False
-        
-        for other_drone_pose in self.other_drones_poses:
-            if other_drone_pose is not None:
-                distance = np.linalg.norm(other_drone_pose.position - self.estimated_pose.position)
-                if distance <= ManagingCollisionParams.critical_collision_world_distance:
-                    collided = True
-                    break
-        
-        return collided
-
     def define_message_for_all(self):
-        in_kill_zone =self.lidar().get_sensor_values() is None 
-        if self.timestep_count<=1 or in_kill_zone: 
-            return None
-        
-        message_batch = DroneMessageBatch(sender_id=self.identifier)
-        message_batch.add_message(DroneMessage(subject=DroneMessage.Subject.PING))
-        message_batch.add_message(DroneMessage(subject=DroneMessage.Subject.DRONE_POSITION, body=self.estimated_pose))
-        message_batch.add_message(DroneMessage(subject=DroneMessage.Subject.GRID_COMMUNICATION, body=self.grid.grid))
-        
-        return message_batch
+        pass
 
     def control(self):
-        in_kill_zone = self.lidar().get_sensor_values() is None or self.drone_health <= 0
+        self.estimated_pose = Pose(np.asarray(self.measured_gps_position()),
+                                self.measured_compass_angle(),self.odometer_values(),self.previous_position[-1],self.previous_orientation[-1],self.size_area)
+        self.timestep_count += 1
 
-        if not in_kill_zone : 
+        self.visualise_actions()
 
-            self.timestep_count += 1
-            
-            self.mapping(display=self.mapping_params.display_map)
-            # Only values other than None are accurate (because they are recent)
-            self.reset_other_drones_poses()
-            self.reset_other_drones_grids()
-            self.handle_communication()
-
-            # Retrieve Sensor Data
-            lidar_values = self.process_lidar_sensor()
-            semantic_values = self.process_semantic_sensor()
-
-            # TRANSITIONS OF THE STATE
-            self.state_update(lidar_values, semantic_values)
-
-            # Execute Corresponding Command
-            state_handlers = {
-                self.State.WAITING: self.handle_waiting,
-                self.State.SEARCHING_WALL: self.handle_searching_wall,
-                self.State.FOLLOWING_WALL: lambda: self.handle_following_wall(lidar_values["epsilon_wall_angle"], lidar_values["min_dist"]),
-                self.State.PATH_TO_WOUNDED: lambda: self.handle_path_to_wounded(semantic_values["position_wounded"]),
-                self.State.GOING_TO_WOUNDED: lambda: self.handle_going_to_wounded(semantic_values["epsilon_wounded"]),
-                self.State.SEARCHING_RESCUE_CENTER: self.handle_searching_rescue_center,
-                self.State.GOING_RESCUE_CENTER: lambda: self.handle_going_rescue_center(semantic_values["epsilon_rescue_center"], semantic_values["is_near_rescue_center"]),
-                self.State.EXPLORING_FRONTIERS: self.handle_exploring_frontiers,
-                self.State.MANAGING_COLLISION: self.handle_managing_collision,
-
-                self.State.ALWAYS_EXPLORING_FRONTIERS: self.handle_exploring_frontiers,
-                self.State.ALWAYS_AT_RETURN_AREA: self.handle_waiting
-            }
-
-            self.visualise_actions()
-
-            return state_handlers.get(self.state, self.handle_unknown_state)()
-        
-        else : 
-            # Drone in KillZone. Or at least no lidar available
-            return {"forward": 0.0, "lateral": 0.0, "rotation": 0.0, "grasper": 0}
-
-    def handle_communication(self):
-        if self.communicator:
-            self.new_received_message_batches = [m[1] for m in self.communicator.received_messages]    # The simulator already groups received messages by sender
-        else:
-            self.new_received_messages_batches = None
-
-        for message_batch in self.new_received_message_batches:
-            # Last hearing (from other drones) timestep update
-            self.timestep_last_hearing[message_batch.sender_id] = self.timestep_count
-        
-            # Other drones positions. Only values other than None are accurate (because they are recent)
-            for position_message in message_batch.get_messages_by_subject(DroneMessage.Subject.DRONE_POSITION):
-                self.other_drones_poses[position_message.sender_id] = position_message.body
-
-            # Other drones grids. Only values other than None are accurate (because they are recent)
-            if self.timestep_count >= CommunicationParams.map_communication_start_timestep:
-                for grid_message in message_batch.get_messages_by_subject(DroneMessage.Subject.GRID_COMMUNICATION):
-                    if self.time_steps_since_incorporating_grid(message_batch.sender_id) >= CommunicationParams.map_communication_minimum_interval:
-                        self.other_drones_grids[grid_message.sender_id] = grid_message.body
-                        self.timestep_last_incorporating_grid[message_batch.sender_id] = self.timestep_count
-
-    def handle_waiting(self):
-        self.need_to_grasp = False
-        self.reset_exploration_path_params()
-        self.step_waiting_count += 1
-        return {"forward": 0.0, "lateral": 0.0, "rotation": 0.0, "grasper": int(self.need_to_grasp)}
-
-    def handle_searching_wall(self):
-        self.need_to_grasp = False
-        return {"forward": 0.5, "lateral": 0.0, "rotation": 0.0, "grasper": int(self.need_to_grasp)}
-
-    def handle_following_wall(self, epsilon_wall_angle, min_dist):
-        self.need_to_grasp = False
-        epsilon_wall_angle = normalize_angle(epsilon_wall_angle)
-        epsilon_wall_distance = min_dist - self.wall_following_params.dist_to_stay
-
-        self.logging_variables({"epsilon_wall_angle": epsilon_wall_angle, "epsilon_wall_distance": epsilon_wall_distance})
-
-        command = {"forward": self.wall_following_params.speed_following_wall, "lateral": 0.0, "rotation": 0.0, "grasper": int(self.need_to_grasp)}
-        command = self.pid_controller(command, epsilon_wall_angle, self.pid_params.Kp_angle, self.pid_params.Kd_angle, self.pid_params.Ki_angle, self.past_ten_errors_angle, "rotation")
-        command = self.pid_controller(command, epsilon_wall_distance, self.pid_params.Kp_distance, self.pid_params.Kd_distance, self.pid_params.Ki_distance, self.past_ten_errors_distance, "lateral")
-
-        return command
-    
-    def handle_managing_collision(self):
-        if self.managing_collision_timestep_count == 0:
-            self.managing_collision_command = {"forward": np.random.uniform(-0.5, 0.5),
-                                               "lateral": np.random.uniform(-0.5, 0.5),
-                                               "rotation": np.random.uniform(-0.5, 0.5)}
-
-        command = self.managing_collision_command
-        command["grasper"] = int(self.need_to_grasp)
-        self.managing_collision_timestep_count += 1
-            
-        return command
-    
-    def handle_path_to_wounded(self, position_wounded):
-        self.need_to_grasp = False
-        if self.previous_state is not self.State.PATH_TO_WOUNDED:
-            self.plan_path_to_wounded(position_wounded)
-        if self.path is None:
-            return self.handle_waiting()
         return self.follow_path(self.path)
-
-    def plan_path_to_wounded(self, position_wounded):
-        start_cell = self.grid._conv_world_to_grid(*self.estimated_pose.position)
-        target_cell = self.grid._conv_world_to_grid(*position_wounded)
-        max_inflation = self.path_params.max_inflation_obstacle
-        self.path = self.grid.compute_safest_path(start_cell, target_cell, max_inflation)
-        self.indice_current_waypoint = 0
-        if self.path is not None:
-            self.finished_path = False
-
-    def handle_going_to_wounded(self, epsilon_wounded):
-        self.need_to_grasp = True
-        epsilon_wounded = normalize_angle(epsilon_wounded)
-        command = {"forward": self.wounded_rescue_params.grasping_speed, "lateral": 0.0, "rotation": 0.0, "grasper": int(self.need_to_grasp)}
-        return self.pid_controller(command, epsilon_wounded, self.pid_params.Kp_angle, self.pid_params.Kd_angle, self.pid_params.Ki_angle, self.past_ten_errors_angle, "rotation")
-
-    def handle_searching_rescue_center(self):
-        self.need_to_grasp = True
-        if self.previous_state is not self.State.SEARCHING_RESCUE_CENTER:
-            self.plan_path_to_rescue_center()
-        if self.path is None:
-            return self.handle_waiting()
-        return self.follow_path(self.path)
-
-    def plan_path_to_rescue_center(self):
-        start_cell = self.grid._conv_world_to_grid(*self.estimated_pose.position)
-        target_cell = self.grid.initial_cell
-        max_inflation = self.path_params.max_inflation_obstacle
-        self.path = self.grid.compute_safest_path(start_cell, target_cell, max_inflation)
-        self.indice_current_waypoint = 0
-        if self.path is not None:
-            self.finished_path = False
-
-    def handle_going_rescue_center(self, epsilon_rescue_center, is_near_rescue_center):
-        self.need_to_grasp = True
-        epsilon_rescue_center = normalize_angle(epsilon_rescue_center)
-        command = {"forward": 3 * self.wounded_rescue_params.grasping_speed, "lateral": 0.0, "rotation": 0.0, "grasper": int(self.need_to_grasp)}
-        command = self.pid_controller(command, epsilon_rescue_center, self.pid_params.Kp_angle, self.pid_params.Kd_angle, self.pid_params.Ki_angle, self.past_ten_errors_angle, "rotation")
-
-        if is_near_rescue_center:
-            command["forward"] = -0.5
-            command["rotation"] = 1.0  # Rotate to drop off
-
-        return command
-
-    def handle_exploring_frontiers(self):
-        self.need_to_grasp = False
-        if self.finished_path:
-            self.plan_path_to_frontier()
-
-        if self.explored_all_frontiers or self.path is None:
-            return self.handle_waiting()
-        else:
-            return self.follow_path(self.path)
-
-    def plan_path_to_frontier(self):
-        if self.grid.closest_largest_frontier(self.estimated_pose) is not None:
-            self.next_frontier, self.next_frontier_centroid = self.grid.closest_largest_frontier(self.estimated_pose)
-            if self.next_frontier_centroid is not None:
-                start_cell = self.grid._conv_world_to_grid(*self.estimated_pose.position)
-                target_cell = self.next_frontier_centroid
-                max_inflation = self.path_params.max_inflation_obstacle
-
-                self.path = self.grid.compute_safest_path(start_cell, target_cell, max_inflation)
-                if self.path is None:   # The frontier is unreachable, probably due to artifacts of FREE zones inside boxes set in the mapping process
-                    self.grid.delete_frontier_artifacts(self.next_frontier)
-                else:
-                    self.finished_path = False
-                    self.indice_current_waypoint = 0
-
-        else:
-            self.explored_all_frontiers = True
-    
-    def handle_unknown_state(self):
-        raise ValueError("State not found")
-
-    def process_semantic_sensor(self):
-        semantic_values = self.semantic_values()
-        
-        best_angle_wounded = 0
-        best_position_wounded = None
-        best_angle_rescue_center = 0
-        found_wounded = False
-        near_wounded = False
-        found_rescue_center = False
-        is_near_rescue_center = False
-        angles_list = []
-
-        scores = []
-        for data in semantic_values:
-            if data.entity_type == DroneSemanticSensor.TypeEntity.RESCUE_CENTER:
-                found_rescue_center = True
-                angles_list.append(data.angle)
-                is_near_rescue_center = (data.distance <= GoingRescueCenterParams.near_center_distance_threshold)
-                best_angle_rescue_center = circular_mean(np.array(angles_list))
-            
-            elif data.entity_type == DroneSemanticSensor.TypeEntity.WOUNDED_PERSON and not data.grasped:
-                found_wounded = True
-                if data.distance <= WoundedRescueParams.near_wounded_distance_threshold:
-                    near_wounded = True
-
-                pose = self.estimated_pose
-                wounded_sighting_position = self.estimated_pose.position + data.distance * np.array(
-                    [np.cos(data.angle + pose.orientation), np.sin(data.angle + pose.orientation)])
-                self.exploration_tracker.add_wounded(wounded_sighting_position)
-
-                v = (data.angle * data.angle) + (data.distance * data.distance / 10 ** 5)
-                scores.append((v, data.angle, data.distance, wounded_sighting_position))
-
-        if scores:
-            _, best_angle_wounded, _, best_position_wounded = min(scores, key=lambda x: x[0])
-
-        return {
-            "near_wounded": near_wounded,
-            "found_wounded": found_wounded,
-            "position_wounded": best_position_wounded,
-            "found_rescue_center": found_rescue_center,
-            "epsilon_wounded": best_angle_wounded,
-            "epsilon_rescue_center": best_angle_rescue_center,
-            "is_near_rescue_center": is_near_rescue_center
-        }
-
-    def process_lidar_sensor(self):
-        """
-        -> ( bool near_obstacle , float epsilon_wall_angle )
-        where epsilon_wall_angle is the (counter-clockwise convention) angle made
-        between the drone and the nearest wall - pi/2
-        """
-        lidar_values = self.lidar().get_sensor_values()
-
-        if lidar_values is None:
-            return (False,0)
-        
-        ray_angles = self.lidar().ray_angles
-        size = self.lidar().resolution
-
-        angle_nearest_obstacle = 0
-        if size != 0:
-            min_dist = min(lidar_values)
-            angle_nearest_obstacle = ray_angles[np.argmin(lidar_values)]
-
-        near_obstacle = False
-        if min_dist < self.wall_following_params.dmax: # pourcentage de la vitesse je pense
-            near_obstacle = True
-
-        epsilon_wall_angle = angle_nearest_obstacle - np.pi/2
-
-        return {"near_obstacle": near_obstacle, "epsilon_wall_angle": epsilon_wall_angle, "min_dist": min_dist}
 
     # Takes the current relative error and with a PID controller, returns the command
     # mode : "rotation" or "lateral" for now could be speed or other if implemented
@@ -495,7 +159,7 @@ class MyDroneFrontex(DroneAbstract):
         dy = y - self.estimated_pose.position[1]
         epsilon = math.atan2(dy,dx) - self.estimated_pose.orientation
         epsilon = normalize_angle(epsilon)
-        command_path = self.pid_controller({"forward": 1,"lateral": 0.0,"rotation": 0.0,"grasper": int(self.need_to_grasp)},epsilon,self.pid_params.Kp_angle_1,self.pid_params.Kd_angle_1,self.pid_params.Ki_angle,self.past_ten_errors_angle,"rotation",0.5)
+        command_path = self.pid_controller({"forward": 1,"lateral": 0.0,"rotation": 0.0,"grasper": 0},epsilon,self.pid_params.Kp_angle_1,self.pid_params.Kd_angle_1,self.pid_params.Ki_angle,self.past_ten_errors_angle,"rotation",0.5)
 
         # ASSERVISSEMENT LATERAL
         if self.indice_current_waypoint == 0:
@@ -507,125 +171,11 @@ class MyDroneFrontex(DroneAbstract):
         # epsilon distance needs to be signed (positive if the angle relative to the theoritical path is positive)
         command_path = self.pid_controller(command_path,epsilon_distance,self.pid_params.Kp_distance_1,self.pid_params.Kd_distance_1,self.pid_params.Ki_distance_1,self.past_ten_errors_distance,"lateral",0.5)
         
-        # ASSERVISSENT EN DISTANCE 
+        # ASSERVISSENT EN DISTANCE
         epsilon_distance_to_waypoint = np.linalg.norm(np.array([x,y]) - self.estimated_pose.position)
         # command_path = self.pid_controller(command_path,epsilon_distance_to_waypoint,self.pid_params.Kp_distance_2,self.pid_params.Kp_distance_2,self.pid_params.Ki_distance_1,self.past_ten_errors_distance,"forward",1)
 
         return command_path
-    
-    def reset_state_timestep_counters(self):
-        self.step_waiting_count = 0
-        self.managing_collision_timestep_count = 0
-
-    def state_update(self, lidar_values, semantic_values):
-        """
-        A visualisation of the state machine is available at doc/Drone states
-        """
-        self.previous_state = self.state
-        
-        conditions = {
-            "collided": self.detect_collision(),
-            "found_wall": lidar_values["near_obstacle"],
-            "lost_wall": not lidar_values["near_obstacle"],
-            "near_wounded": semantic_values["near_wounded"],
-            "found_wounded": semantic_values["found_wounded"],
-            "holding_wounded": bool(self.base.grasper.grasped_entities),
-            "lost_wounded": not semantic_values["found_wounded"] and not self.base.grasper.grasped_entities,
-            "found_rescue_center": semantic_values["found_rescue_center"],
-            "lost_rescue_center": not self.base.grasper.grasped_entities,
-            "finished_path": self.finished_path,
-            "no_frontiers_left": len(self.grid.frontiers) == 0,
-            "waiting_time_over": self.step_waiting_count >= self.waiting_params.step_waiting,
-            "managing_collision_time_over": self.managing_collision_timestep_count >= ManagingCollisionParams.step_duration_managing_collision,
-            "no_condition": False
-        }
-
-        STATE_TRANSITIONS = {
-            self.State.WAITING: {
-                "near_wounded": self.State.GOING_TO_WOUNDED,
-                "found_wounded": self.State.PATH_TO_WOUNDED,
-                "waiting_time_over": self.State.EXPLORING_FRONTIERS
-            },
-            self.State.PATH_TO_WOUNDED:{
-                "collided": self.State.MANAGING_COLLISION,
-                "near_wounded": self.State.GOING_TO_WOUNDED,
-                "finished_path": self.State.WAITING
-            },
-            self.State.GOING_TO_WOUNDED: {
-                "collided": self.State.MANAGING_COLLISION,
-                "lost_wounded": self.State.WAITING,
-                "holding_wounded": self.State.SEARCHING_RESCUE_CENTER
-            },
-            self.State.SEARCHING_RESCUE_CENTER: {
-                "collided": self.State.MANAGING_COLLISION,
-                "lost_rescue_center": self.State.WAITING,
-                "found_rescue_center": self.State.GOING_RESCUE_CENTER
-            },
-            self.State.GOING_RESCUE_CENTER: {
-                "collided": self.State.MANAGING_COLLISION,
-                "lost_rescue_center": self.State.WAITING
-            },
-            self.State.EXPLORING_FRONTIERS: {
-                "collided": self.State.MANAGING_COLLISION,
-                "near_wounded": self.State.GOING_TO_WOUNDED,
-                "found_wounded": self.State.PATH_TO_WOUNDED,
-                "no_frontiers_left": self.State.FOLLOWING_WALL
-            },
-            self.State.SEARCHING_WALL: {
-                "collided": self.State.MANAGING_COLLISION,
-                "near_wounded": self.State.GOING_TO_WOUNDED,
-                "found_wounded": self.State.PATH_TO_WOUNDED,
-                "found_wall": self.State.FOLLOWING_WALL
-            },
-            self.State.FOLLOWING_WALL: {
-                "collided": self.State.MANAGING_COLLISION,
-                "near_wounded": self.State.GOING_TO_WOUNDED,
-                "found_wounded": self.State.GOING_TO_WOUNDED,
-                "lost_wall": self.State.SEARCHING_WALL
-            },
-            self.State.MANAGING_COLLISION: {
-                "managing_collision_time_over": self.State.WAITING
-            },
-            # ONLY TWO DRONES CAN BE IN THE FOLLOWING EVER-LASTING STATES
-            self.State.ALWAYS_EXPLORING_FRONTIERS: {
-                "collided": self.State.MANAGING_COLLISION,
-                "no_frontiers_left": self.State.WAITING
-            },
-            self.State.ALWAYS_AT_RETURN_AREA: {
-                "no_condition": self.State.ALWAYS_AT_RETURN_AREA
-            }
-        }
-
-        for condition, next_state in STATE_TRANSITIONS.get(self.state, {}).items():
-            if conditions[condition]:
-                self.state = next_state
-                break
-
-        if self.state != self.previous_state:
-            self.reset_state_timestep_counters()
-
-    
-    def mapping(self, display = False):
-        
-        if self.timestep_count == 1: # first iterations
-            print("Starting control")
-            start_x, start_y = self.measured_gps_position()
-            print(f"Initial position: {start_x}, {start_y}")
-            self.grid.set_initial_cell(start_x, start_y)
-
-        self.estimated_pose = Pose(np.asarray(self.measured_gps_position()),
-                                   self.measured_compass_angle(),self.odometer_values(),self.previous_position[-1],self.previous_orientation[-1],self.size_area)
-        
-        self.previous_position.append(self.estimated_pose.position)
-        self.previous_orientation.append(self.estimated_pose.orientation)
-
-        self.grid.full_update(self.estimated_pose, self.other_drones_grids, self.other_drones_poses)
-        
-        if display and (self.timestep_count % 5 == 0):
-             self.grid.display(self.grid.zoomed_grid,
-                               self.estimated_pose,
-                               title=f"Drone {self.identifier} zoomed occupancy grid")
-
 
     # Use this function only at one place in the control method. Not handled othewise.
     # params : variables_to_log : dict of variables to log with keys as variable names and values as variable values.
@@ -665,9 +215,6 @@ class MyDroneFrontex(DroneAbstract):
             # Clear the buffer
             self.log_buffer.clear()
 
-    def draw_point(self,point, color=arcade.color.GO_GREEN):
-        arcade.draw_circle_filled(point[0], point[1], 5, color)
-
     def draw_path(self, path):
         length = len(path)
         pt2 = None
@@ -684,22 +231,6 @@ class MyDroneFrontex(DroneAbstract):
     def draw_top_layer(self):
         if self.visualisation_params.draw_path:
             self.draw_path(self.path)
-
-        if self.state == self.State.EXPLORING_FRONTIERS:
-            if self.visualisation_params.draw_frontier_centroid and self.next_frontier_centroid is not None:
-                self.draw_point(self.grid._conv_grid_to_world(*self.next_frontier_centroid) + self._half_size_array)     # frame of reference change
-            
-            if self.visualisation_params.draw_frontier_points and self.next_frontier is not None:
-                for point in self.next_frontier.cells:
-                    self.draw_point(self.grid._conv_grid_to_world(*point) + self._half_size_array, color=arcade.color.AIR_FORCE_BLUE)
-        
-        if self.visualisation_params.draw_unrescued_wounded:
-            for wounded in self.exploration_tracker.wounded_persons:
-                if not wounded.rescued:
-                    self.draw_point(wounded.position + self._half_size_array, color=arcade.color.NAVAJO_WHITE)
-        
-        if self.identifier == StrategyParams.id_always_exploring:
-            self.draw_identifier()
 
     def visualise_actions(self):
         """

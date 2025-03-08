@@ -222,7 +222,7 @@ class MyDroneFrontex(DroneAbstract):
 
             return state_handlers.get(self.state, self.handle_unknown_state)()
         
-        else : 
+        else :
             # Drone in KillZone. Or at least no lidar available
             return {"forward": 0.0, "lateral": 0.0, "rotation": 0.0, "grasper": 0}
 
