@@ -27,10 +27,6 @@ from solutions.utils.dataclasses_config import *
 
 from scipy.optimize import linear_sum_assignment
 
-from swarm_rescue.solutions.utils.astar import can_go_straight
-from swarm_rescue.solutions.utils.dataclasses_config import GraspingParams
-
-
 class MyDroneFrontex(DroneAbstract):
     class State(Enum):
         """
