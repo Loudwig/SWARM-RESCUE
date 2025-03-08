@@ -324,7 +324,7 @@ class MyDroneFrontex(DroneAbstract):
                     if can_go_straight(*own_cell, *target_cell, self.grid.to_ternary_map()):
                         cost_matrix[i, j] = math.dist(self.grid._conv_world_to_grid(*drone_pos), cell_centroid)
                     else:
-                        cost_matrix[i, j] = math.dist(self.grid._conv_world_to_grid(*drone_pos), cell_centroid)**2
+                        cost_matrix[i, j] = math.dist(self.grid._conv_world_to_grid(*drone_pos), cell_centroid)*10**3
 
                 # cost_matrix[i,j] = self.path_distance(self.grid.compute_safest_path(
                 #     self.grid._conv_world_to_grid(*drone_pos),
