@@ -23,8 +23,9 @@ class WaitingStateParams:
     step_waiting: int = 20
 
 @dataclass
-class GraspingParams:
+class WoundedRescueParams:
     grasping_speed: float = 0.3
+    near_wounded_distance_threshold: float = 50.0
 
 @dataclass
 class WallFollowingParams:
@@ -32,6 +33,10 @@ class WallFollowingParams:
     dist_to_stay: int = 40
     speed_following_wall: float = 0.3
     speed_turning: float = 0.05
+
+@dataclass
+class GoingRescueCenterParams:
+    near_center_distance_threshold: float = 30.0
 
 @dataclass
 class ManagingCollisionParams:
