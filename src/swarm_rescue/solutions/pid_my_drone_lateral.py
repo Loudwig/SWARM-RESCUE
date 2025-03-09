@@ -149,8 +149,7 @@ class MyDronePID_lateral(DroneAbstract):
         
         correction_proportionnelle = Kp * epsilon
         correction_derivee = Kd * deriv_epsilon
-        correction_integrale = 0
-        #correction_integrale = Ki * sum(past_ten_errors)
+        correction_integrale = Ki * sum(past_ten_errors)
         correction = correction_proportionnelle + correction_derivee + correction_integrale
         command[mode] = correction
         command[mode] = min( max(-1,correction) , 1 )
