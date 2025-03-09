@@ -107,7 +107,7 @@ class MyDronePID_lateral(DroneAbstract):
         # Append values
         with open(csv_file, 'a', newline='') as f:
             writer = csv.writer(f)
-            writer.writerow([self.timestep_count, self.epsilon_angle, self.epsilon_lateral])
+            writer.writerow([self.timestep_count, self.epsilon_lateral])
 
     def serialize_PID_params(self):
         """Serialize PIDParams to CSV file"""
@@ -200,7 +200,6 @@ class MyDronePID_lateral(DroneAbstract):
             x_previous_waypoint,y_previous_waypoint = self.path[self.indice_current_waypoint-1][0],self.path[self.indice_current_waypoint-1][1]
 
         epsilon_distance = compute_relative_distance_to_droite(x_previous_waypoint,y_previous_waypoint,x,y,self.estimated_pose.position[0],self.estimated_pose.position[1])
-        print("epsilon_distance",epsilon_distance)
         # epsilon distance needs to be signed (positive if the angle relative to the theoritical path is positive)
         command_path = self.pid_controller(command_path,epsilon_distance,self.pid_params.Kp_distance,self.pid_params.Kd_distance,self.pid_params.Ki_distance,self.past_ten_errors_distance,"lateral",0.5)
 
