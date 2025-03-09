@@ -94,7 +94,7 @@ class BehaviourParams:
 @dataclass
 class HealthParams:
     THRESHOLD_HEALTH: int = 5
-    THRESHOLD_TIMESTEP: float = 0.8
+    THRESHOLD_TIMESTEP: float = 0.05
 
 @dataclass
 class CommunicationParams:

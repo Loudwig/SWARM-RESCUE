@@ -192,7 +192,7 @@ class MyDroneFrontex(DroneAbstract):
             self.timestep_count += 1
             self.history_health.append(self.drone_health)
 
-            if np.sum(np.diff(self.history_health) < 0)>4:
+            if np.sum(np.diff(self.history_health) < 0)>2:
                 print(self.identifier,np.sum(np.diff(self.history_health) < 0))
             
             #if self.state not in [self.State.SEARCHING_RESCUE_CENTER,self.State.GOING_RESCUE_CENTER]:
@@ -226,7 +226,7 @@ class MyDroneFrontex(DroneAbstract):
                 self.State.STOP: lambda: {"forward": 0.0, "lateral": 0.0, "rotation": 0.0, "grasper": 0}
             }
 
-            #print(self.identifier, self.state)
+            print(self.identifier, self.state)
 
             self.visualise_actions()
 
@@ -689,7 +689,7 @@ class MyDroneFrontex(DroneAbstract):
         conditions = {
             "must_return": must_return,
             "is_and_must_inside_return": self.is_inside_return_area and must_return and (not bool(self.base.grasper.grasped_entities)),
-            "no_longer_inside_return": not self.is_inside_return_area and must_return,
+            "no_longer_inside_return": not self.is_inside_return_area and must_return and (not bool(self.base.grasper.grasped_entities)),
             "no_gps" : not self.estimated_pose.gps,
             "found_wall": found_wall,
             "lost_wall": not found_wall,
