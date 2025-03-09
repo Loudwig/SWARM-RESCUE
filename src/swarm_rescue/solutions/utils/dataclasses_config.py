@@ -49,18 +49,23 @@ class PIDParams:
     Kd_angle: float = Kp_angle / 10
     Ki_angle: float = 0.0
     
-    Kp_distance : float = 0.3111
-    Kd_distance: float = 1.3667
-    Ki_distance: float = 0.0
+    Kp_lateral : float = 0.3111
+    Kd_lateral: float = 1.3667
+    Ki_lateral: float = 0.0
 
-    #Kp_distance : float = 2 / abs(10)
-    #Ki_distance: float = 1 / abs(10) * 1 / 20 * 1 / 10
-    #Kd_distance: float = 2 * Kp_distance
+    #Kp_lateral : float = 2 / abs(10)
+    #Ki_lateral: float = 1 / abs(10) * 1 / 20 * 1 / 10
+    #Kd_lateral: float = 2 * Kp_lateral
+
+    Kp_forward: float = 1.6
+    Kd_forward: float = 11.0
+    Ki_forward: float = 0.0
 
 @dataclass
 class PathParams:
     distance_close_waypoint: int = 20
     max_inflation_obstacle: int = 5
+    threshold_waypoint_distance: float = 100.0
 
 @dataclass
 class LogParams:

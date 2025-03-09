@@ -52,7 +52,7 @@ class MyDronePID(DroneAbstract):
         self.wall_following_params = WallFollowingParams()
         self.pid_params = PIDParams()
         self.past_ten_errors_angle = [0] * 10
-        self.past_ten_errors_distance = [0] * 10
+        self.past_ten_errors_lateral = [0] * 10
         
         # PATH FOLLOWING
         self.path_params = PathParams()
@@ -142,7 +142,8 @@ class MyDronePID(DroneAbstract):
         elif mode == "lateral":
             self.epsilon_lateral = epsilon
             deriv_epsilon = -np.sin(self.odometer_values()[1])*self.odometer_values()[0] # vitesse latérale
-        elif mode == "forward" : 
+        elif mode == "forward" :
+            self.epsilon_forward = epsilon
             deriv_epsilon = self.odometer_values()[0]*np.cos(self.odometer_values()[1]) # vitesse longitudinale
         else : 
             raise ValueError("Mode not found")
@@ -196,9 +197,13 @@ class MyDronePID(DroneAbstract):
         else : 
             x_previous_waypoint,y_previous_waypoint = self.path[self.indice_current_waypoint-1][0],self.path[self.indice_current_waypoint-1][1]
 
-        epsilon_distance = compute_relative_distance_to_droite(x_previous_waypoint,y_previous_waypoint,x,y,self.estimated_pose.position[0],self.estimated_pose.position[1])
+        epsilon_lateral = compute_relative_distance_to_droite(x_previous_waypoint,y_previous_waypoint,x,y,self.estimated_pose.position[0],self.estimated_pose.position[1])
         # epsilon distance needs to be signed (positive if the angle relative to the theoritical path is positive)
-        command_path = self.pid_controller(command_path,epsilon_distance,self.pid_params.Kp_distance,self.pid_params.Kd_distance,self.pid_params.Ki_distance,self.past_ten_errors_distance,"lateral",0.5)
+        command_path = self.pid_controller(command_path,epsilon_lateral,self.pid_params.Kp_lateral,self.pid_params.Kd_lateral,self.pid_params.Ki_lateral,self.past_ten_errors_lateral,"lateral",0.5)
+
+        epsilon_forward = np.linalg.norm([dx,dy])
+        if epsilon_forward <= PathParams.threshold_waypoint_distance:
+            command_path = self.pid_controller(command_path,epsilon_forward,self.pid_params.Kp_forward,self.pid_params.Kd_forward,self.pid_params.Ki_forward,self.past_ten_errors_lateral,"forward",0.5)
 
         return command_path
 
