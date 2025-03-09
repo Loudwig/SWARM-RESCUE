@@ -18,7 +18,7 @@ class WaitingStateParams:
 class GraspingParams:
     grasping_speed: float = 0.4
     grasping_dist: int = 30
-    hampering_dist: int = 10
+    hampering_dist: int = 5
 
 @dataclass
 class WallFollowingParams:

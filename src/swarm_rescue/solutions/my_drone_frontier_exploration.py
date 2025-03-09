@@ -199,7 +199,7 @@ class MyDroneFrontex(DroneAbstract):
 
             # Retrieve Sensor Data
             found_wall, epsilon_wall_angle, min_dist = self.process_lidar_sensor(self.lidar())
-            found_wounded, found_rescue_center, score_wounded, epsilon_wounded, epsilon_rescue_center, is_near_rescue_center,min_dist_wnd = self.process_semantic_sensor()
+            found_wounded, found_rescue_center, score_wounded, epsilon_wounded, epsilon_rescue_center, is_near_rescue_center,is_very_near_rescue_center, min_dist_wnd = self.process_semantic_sensor()
 
             is_near_rescuing_drone = self.check_near_rescuing_drone(threshold=GraspingParams.hampering_dist)
             if is_near_rescuing_drone:
@@ -218,7 +218,7 @@ class MyDroneFrontex(DroneAbstract):
                 self.State.FOLLOWING_WALL: lambda: self.handle_following_wall(epsilon_wall_angle, min_dist),
                 self.State.GRASPING_WOUNDED: lambda: self.handle_grasping_wounded(min_dist_wnd, epsilon_wounded),
                 self.State.SEARCHING_RESCUE_CENTER: lambda : self.handle_searching_rescue_center(epsilon_wall_angle,min_dist),
-                self.State.GOING_RESCUE_CENTER: lambda: self.handle_going_rescue_center(epsilon_rescue_center, is_near_rescue_center),
+                self.State.GOING_RESCUE_CENTER: lambda: self.handle_going_rescue_center(epsilon_rescue_center, is_very_near_rescue_center),
                 self.State.EXPLORING_FRONTIERS: lambda: self.handle_exploring_frontiers(is_near_rescue_center),
                 self.State.STOP: lambda: {"forward": 0.0, "lateral": 0.0, "rotation": 0.0, "grasper": 0}
             }
@@ -277,17 +277,18 @@ class MyDroneFrontex(DroneAbstract):
             
             self.no_previous_gps = False
             command = self.follow_path(self.path, found_and_near_wounded=True)
-            movement = math.dist(self.grid._conv_world_to_grid(*self.estimated_pose.position), self.last_position)
-            if movement < 0.5:
-                print("on bouge pas gros")
-                self.counter_static += 1
-            else:
-                self.counter_static = 0
-            if self.counter_static > 100:
-                print("Grasper drone too static, exiting")
-                command["grasper"] = 0
-                self.counter_static = 0
             return command
+            #movement = math.dist(self.grid._conv_world_to_grid(*self.estimated_pose.position), self.last_position)
+            #if movement < 0.05:
+            #    print("on bouge pas gros")
+            #    self.counter_static += 1
+            #else:
+            #    self.counter_static = 0
+            #if self.counter_static > 200:
+            #    print("Grasper drone too static, exiting")
+            #    command["grasper"] = 0
+            #    self.counter_static -= 20
+            #return command
 
     def plan_path_to_rescue_center(self):
         start_cell = self.grid._conv_world_to_grid(*self.estimated_pose.position)
@@ -297,13 +298,14 @@ class MyDroneFrontex(DroneAbstract):
         #print(self.path)
         self.indice_current_waypoint = 0
 
-    def handle_going_rescue_center(self, epsilon_rescue_center, is_near_rescue_center):
+    def handle_going_rescue_center(self, epsilon_rescue_center, is_very_near):
         epsilon_rescue_center = normalize_angle(epsilon_rescue_center)
-        command = {"forward":  2*self.grasping_params.grasping_speed, "lateral": 0.0, "rotation": 0.0, "grasper": 1}
+        command = {"forward":  1.0, "lateral": 0.0, "rotation": 0.0, "grasper": 1}
         command = self.pid_controller(command, epsilon_rescue_center, self.pid_params.Kp_angle, self.pid_params.Kd_angle, self.pid_params.Ki_angle, self.past_ten_errors_angle, "rotation")
 
-        if is_near_rescue_center:
+        if is_very_near:
             command["forward"] = 0.0
+            #command["rotation"] =
             movement = math.dist(self.grid._conv_world_to_grid(*self.estimated_pose.position), self.last_position)
             if movement < 0.5:
                 print("on bouge pas gros")
@@ -313,10 +315,10 @@ class MyDroneFrontex(DroneAbstract):
             if self.counter_static > 20:
                 print("Grasper drone too static, exiting")
                 command["grasper"] = 0
-                command["rotation"] = 1.0
-                self.counter_static = 0
+                #command["forward"] = -1.0
+                #command["rotation"] = 1.0
+                self.counter_static -= 1
             #command["rotation"] = 1.0  # Rotate in place to drop off
-
         return command
 
     def handle_exploring_frontiers(self,is_near_rescue_center):
@@ -509,6 +511,7 @@ class MyDroneFrontex(DroneAbstract):
         found_wounded = False
         found_rescue_center = False
         is_near_rescue_center = False
+        is_very_near_rescue_center = False
         angles_list = []
 
         scores = []
@@ -518,7 +521,9 @@ class MyDroneFrontex(DroneAbstract):
                 angles_list.append(data.angle)
                 if data.distance<min_rescue_dist:
                     min_rescue_dist = data.distance
-                if data.distance < 30.0:
+                if data.distance < 45.0:
+                    is_very_near_rescue_center = True
+                if data.distance < 80.0:
                     is_near_rescue_center = True
                 best_angle_rescue_center = circular_mean(np.array(angles_list))
             
@@ -552,7 +557,7 @@ class MyDroneFrontex(DroneAbstract):
                 best_angle_wounded = score[1]
                 mindist = score[2]
 
-        return found_wounded,found_rescue_center,best_score,best_angle_wounded,best_angle_rescue_center,is_near_rescue_center,mindist
+        return found_wounded,found_rescue_center,best_score,best_angle_wounded,best_angle_rescue_center,is_near_rescue_center,is_very_near_rescue_center,mindist
     
     def process_lidar_sensor(self,self_lidar):
         """
