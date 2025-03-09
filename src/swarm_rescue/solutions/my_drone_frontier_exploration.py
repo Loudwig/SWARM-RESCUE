@@ -226,7 +226,7 @@ class MyDroneFrontex(DroneAbstract):
                 self.State.STOP: lambda: {"forward": 0.0, "lateral": 0.0, "rotation": 0.0, "grasper": 0}
             }
 
-            print(self.identifier, self.state)
+            #print(self.identifier, self.state)
 
             self.visualise_actions()
 
