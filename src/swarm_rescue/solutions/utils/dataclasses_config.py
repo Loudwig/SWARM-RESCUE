@@ -49,9 +49,9 @@ class PIDParams:
     Kd_angle: float = Kp_angle / 10
     Ki_angle: float = (1 / 10) * (1 / 20) * 2 / math.pi
     
-    Kp_distance : float = 2 / abs(10)
-    Ki_distance: float = 1 / abs(10) * 1 / 20 * 1 / 10
-    Kd_distance: float = 2 * Kp_distance
+    Kp_distance : float = 1.0
+    Kd_distance: float = 1.0
+    Ki_distance: float = 0.0
 
 @dataclass
 class PathParams:

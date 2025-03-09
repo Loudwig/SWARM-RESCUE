@@ -35,20 +35,19 @@ import os
 from glob import glob
 
 def plot_pid_values(log_number: str):
-    """
-    Plot PID values from angle and lateral CSV files
-    
-    Args:
-        log_number: The log file number to analyze
-    """
+    """Plot PID values from angle and lateral CSV files with PID parameters"""
     # Set up paths
     log_dir = "logs"
     angle_file = os.path.join(log_dir, f"{log_number}_pid_values_angle.csv")
     lateral_file = os.path.join(log_dir, f"{log_number}_pid_values_lateral.csv")
+    params_file = os.path.join(log_dir, f"{log_number}_pid_params_drone.csv")
     
     # Read CSV files
     angle_df = pd.read_csv(angle_file)
     lateral_df = pd.read_csv(lateral_file)
+    
+    # Read PID parameters
+    pid_params = pd.read_csv(params_file)
     
     # Create figure with two subplots
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8))
@@ -61,12 +60,26 @@ def plot_pid_values(log_number: str):
     ax1.grid(True)
     ax1.legend()
     
+    # Add angle PID parameters text
+    angle_params_text = f'Angle PID:\nKp = {pid_params["Kp_angle"].iloc[0]:.4f}\nKd = {pid_params["Kd_angle"].iloc[0]:.4f}\nKi = {pid_params["Ki_angle"].iloc[0]:.4f}'
+    ax1.text(0.02, 0.98, angle_params_text,
+             transform=ax1.transAxes,
+             verticalalignment='top',
+             bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+    
     # Plot lateral error
     ax2.plot(lateral_df['timestep'], lateral_df['epsilon_lateral'], 'r-', label='Lateral Error')
     ax2.set_xlabel('Timestep')
     ax2.set_ylabel('Lateral Error (pixels)')
     ax2.grid(True)
     ax2.legend()
+    
+    # Add lateral PID parameters text
+    lateral_params_text = f'Lateral PID:\nKp = {pid_params["Kp_distance"].iloc[0]:.4f}\nKd = {pid_params["Kd_distance"].iloc[0]:.4f}\nKi = {pid_params["Ki_distance"].iloc[0]:.4f}'
+    ax2.text(0.02, 0.98, lateral_params_text,
+             transform=ax2.transAxes,
+             verticalalignment='top',
+             bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
     
     # Adjust layout and save plot
     plt.tight_layout()
