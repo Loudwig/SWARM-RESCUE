@@ -24,7 +24,7 @@ from solutions.pid_my_drone_lateral import MyDronePID_lateral
 from solutions.pid_my_drone_angle import MyDronePID_angle
 from solutions.pid_my_drone import MyDronePID
 
-class MyDrone(MyDronePID):
+class MyDrone(MyDronePID_lateral):
     pass
 
 

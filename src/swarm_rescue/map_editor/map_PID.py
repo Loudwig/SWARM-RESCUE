@@ -31,8 +31,8 @@ class MyMapPID(MapAbstract):
 
     def __init__(self, zones_config: ZonesConfig = ()):
         super().__init__(zones_config)
-        self._max_timestep_limit = 7200
-        self._max_walltime_limit = 1440  # In seconds
+        self._max_timestep_limit = 200
+        self._max_walltime_limit = 200  # In seconds
 
         # PARAMETERS MAP
         self._size_area = (1819, 1000)
@@ -49,6 +49,10 @@ class MyMapPID(MapAbstract):
         self._drones_pos = [((0, 0), 0)]
 
         self._drones: List[DroneAbstract] = []
+
+        self._wounded_persons_pos = [(1000, 500)]
+        self._number_wounded_persons = len(self._wounded_persons_pos)
+        self._wounded_persons: List[WoundedPerson] = []
 
     def construct_playground(self, drone_type: Type[DroneAbstract]) -> Playground:
         playground = ClosedPlayground(size=self._size_area)
@@ -75,7 +79,7 @@ class MyMapPID(MapAbstract):
 
 
 if __name__ == '__main__':
-    my_map = MyMapFinal2022_23()
+    my_map = MyMapPID()
     my_playground = my_map.construct_playground(drone_type=DroneMotionless)
 
     gui = GuiSR(playground=my_playground,
