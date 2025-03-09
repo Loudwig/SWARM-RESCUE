@@ -47,11 +47,11 @@ class ManagingCollisionParams:
 class PIDParams:
     Kp_angle: float = 9 / math.pi
     Kd_angle: float = Kp_angle / 10
-    Ki_angle: float = (1 / 10) * (1 / 20) * 2 / math.pi
+    Ki_angle: float = 0.0
     
-    Kp_distance : float = 0.5
-    Kd_distance: float = 1.5
-    Ki_distance: float = 0.01
+    Kp_distance : float = 0.3111
+    Kd_distance: float = 1.3667
+    Ki_distance: float = 0.0
 
 @dataclass
 class PathParams:

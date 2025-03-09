@@ -9,15 +9,22 @@ from typing import Dict, List, Tuple
 
 class OptimizationConfig:
     # Parameter ranges to test
-    kp_distance_range: List[float] = [0.5, 1.0, 1.5, 2.0]
-    kd_distance_range: List[float] = [0.5, 1.0, 1.5, 2.0]
-    ki_distance_range: List[float] = [0.0, 0.01, 0.05, 0.1]
+    kp_distance_range: List[float] = [0.3111]
+    kd_distance_range: List[float] = [1.3667]
+    ki_distance_range: List[float] = np.linspace(0.0000, 0.0001, 10)
     
     # Number of tests per parameter combination
     tests_per_config: int = 1
     
-    # Metric to optimize - 'mse', 'mae', or 'max_error'
-    metric: str = 'mse'
+    # Metric to optimize
+    # Options: 'overshoot', 'settling_time', 'stability', 'composite'
+    metric: str = 'composite'
+
+    # Weights for composite metric (only used if metric='composite')
+    # These weights determine the importance of each factor in the overall evaluation
+    overshoot_weight: float = 0.5
+    settling_time_weight: float = 0.5
+    stability_weight: float = 1
     
     # Set to True to enable grid search across all parameter combinations
     grid_search: bool = True
@@ -29,6 +36,25 @@ class OptimizationConfig:
     base_kp_distance: float = 1.0
     base_kd_distance: float = 1.0
     base_ki_distance: float = 0.0
+
+def calculate_composite_score(metrics: Dict[str, float], config) -> float:
+    """
+    Calculate a composite score from multiple metrics.
+    Lower score is better.
+    """
+    # Get individual metrics with default values if not present
+    overshoot = metrics.get('overshoot', float('inf'))
+    settling_time = metrics.get('settling_time', float('inf'))
+    stability = metrics.get('stability', float('inf'))
+    
+    # Calculate weighted composite score
+    composite_score = (
+        config.overshoot_weight * overshoot +
+        config.settling_time_weight * settling_time +
+        config.stability_weight * stability
+    )
+    
+    return composite_score
 
 
 def modify_pid_params(kp_distance: float, kd_distance: float, ki_distance: float) -> None:
@@ -111,10 +137,13 @@ def cleanup_log_files(log_id: str, keep_best_logs=False) -> None:
                     print(f"Warning: Could not remove {file_path}: {e}")
 
 
-def evaluate_performance(log_id: str) -> Dict[str, float]:
+def evaluate_performance(log_id: str, config) -> Dict[str, float]:
     """
     Evaluate the performance of the PID controller using the logs
-    Returns a dictionary of metrics
+    Returns a dictionary of metrics including:
+    - Overshoot: Maximum deviation beyond the target
+    - Settling Time: Time to reach and stay within 5% of the final value
+    - Stability: Measure of oscillation (lower is better)
     """
     log_dir = "logs"
     lateral_file = os.path.join(log_dir, f"{log_id}_pid_values_lateral.csv")
@@ -122,21 +151,99 @@ def evaluate_performance(log_id: str) -> Dict[str, float]:
     # Check if file exists
     if not os.path.exists(lateral_file):
         print(f"Error: Log file {lateral_file} not found")
-        return {"mse": float('inf'), "mae": float('inf'), "max_error": float('inf')}
+        return {"mse": float('inf'), "mae": float('inf'), "max_error": float('inf'),
+                "overshoot": float('inf'), "settling_time": float('inf'), "stability": float('inf')}
     
     # Read the log file
     lateral_df = pd.read_csv(lateral_file)
     
-    # Calculate metrics
-    # We want to minimize these error metrics
+    # Calculate basic metrics
     abs_errors = np.abs(lateral_df['epsilon_lateral'])
     squared_errors = abs_errors ** 2
     
-    metrics = {
-        "mse": np.mean(squared_errors),  # Mean Squared Error
-        "mae": np.mean(abs_errors),      # Mean Absolute Error
-        "max_error": np.max(abs_errors)  # Maximum Absolute Error
-    }
+    metrics = {}
+    
+    # Advanced metrics
+    try:
+        errors = lateral_df['epsilon_lateral'].values
+        timesteps = lateral_df['timestep'].values
+        
+        # Calculate overshoot after the initial one
+        if len(errors) > 10:  # Ensure we have enough data points
+            # Detect sign changes in the error
+            sign_changes = np.where(np.diff(np.signbit(errors)))[0]
+            
+            if len(sign_changes) > 0:
+                # Get the index of the first sign change
+                first_sign_change = sign_changes[0]
+                print(first_sign_change)
+                
+                # Only consider errors after the first sign change
+                # This means we're only measuring overshoots after the drone has crossed the target path
+                if first_sign_change + 1 < len(errors):
+                    post_crossing_errors = abs_errors[first_sign_change+1:]
+                    if len(post_crossing_errors) > 0:
+                        metrics["overshoot"] = np.max(post_crossing_errors)
+                    else:
+                        metrics["overshoot"] = 0.0
+                else:
+                    # No data points after first sign change
+                    metrics["overshoot"] = 0.0
+            else:
+                # No sign changes detected, so no real overshoots
+                metrics["overshoot"] = 0.0
+        else:
+            # Not enough data points
+            metrics["overshoot"] = np.max(abs_errors)
+        
+        # Calculate settling time
+        # Time to reach and stay within a certain percentage of the target value
+        # We'll use 5% of the maximum error as our threshold
+        if len(errors) > 10:  # Ensure we have enough data points
+            threshold = 0.05 * np.max(abs_errors)  # 5% of maximum error
+            
+            # Find the point where error remains below threshold
+            settled = False
+            settling_time = len(errors)  # Default to max time if never settles
+            
+            for i in range(10, len(errors)):  # Start after initial transients
+                # Check if error stays below threshold for the next 10 timesteps
+                if all(abs_errors[i:min(i+10, len(errors))] < threshold):
+                    settled = True
+                    settling_time = timesteps[i] - timesteps[0]
+                    break
+            
+            metrics["settling_time"] = settling_time if settled else float('inf')
+        else:
+            metrics["settling_time"] = float('inf')
+        
+        # Calculate stability (oscillation measure)
+        # Count zero-crossings and compute the variance of error rate of change
+        if len(errors) > 3:
+            # Compute rate of change
+            error_derivative = np.diff(errors)
+            
+            # Count sign changes (zero crossings)
+            sign_changes = np.sum(np.diff(np.signbit(error_derivative)) != 0)
+            
+            # Normalize by length
+            oscillation_rate = sign_changes / (len(error_derivative) - 1)
+            
+            # Variance of error derivative (higher variance = less stability)
+            derivative_variance = np.var(error_derivative)
+            
+            # Combine into a stability metric (lower is better)
+            metrics["stability"] = oscillation_rate * derivative_variance
+        else:
+            metrics["stability"] = float('inf')
+        
+        metrics["composite"] = calculate_composite_score(metrics, config)
+            
+    except Exception as e:
+        print(f"Warning: Error calculating advanced metrics: {e}")
+        metrics["overshoot"] = float('inf')
+        metrics["settling_time"] = float('inf')
+        metrics["stability"] = float('inf')
     
     return metrics
 
@@ -169,7 +276,7 @@ def optimize_pid():
                     log_id = run_pid_tests()
                     if log_id:
                         # Evaluate performance
-                        metrics = evaluate_performance(log_id)
+                        metrics = evaluate_performance(log_id, config)
                         
                         result = {
                             'kp_distance': kp,
@@ -180,7 +287,7 @@ def optimize_pid():
                         }
                         
                         results.append(result)
-                        print(f"Results: MSE={metrics['mse']:.4f}, MAE={metrics['mae']:.4f}, Max Error={metrics['max_error']:.4f}")
+                        print(f"Results: Overshoot={metrics['overshoot']:.4f}, Settling Time={metrics['settling_time']:.4f}, Stability={metrics['stability']:.4f}")
                         best_result = min(results, key=lambda x: x.get(config.metric, float('inf')))
         
                         print(f"Best parameters so far: Kp_distance = {best_result.get('kp_distance', 0)}, Kd_distance = {best_result.get('kd_distance', 0)}, Ki_distance = {best_result.get('ki_distance', 0)}")
@@ -210,7 +317,7 @@ def optimize_pid():
             log_id = run_pid_tests()
             if log_id:
                 # Evaluate performance
-                metrics = evaluate_performance(log_id)
+                metrics = evaluate_performance(log_id, config)
                 
                 result = {
                     'kp_distance': kp,
@@ -245,7 +352,7 @@ def optimize_pid():
             log_id = run_pid_tests()
             if log_id:
                 # Evaluate performance
-                metrics = evaluate_performance(log_id)
+                metrics = evaluate_performance(log_id, config)
                 
                 result = {
                     'kp_distance': kp_best,
@@ -281,7 +388,7 @@ def optimize_pid():
                 log_id = run_pid_tests()
                 if log_id:
                     # Evaluate performance
-                    metrics = evaluate_performance(log_id)
+                    metrics = evaluate_performance(log_id, config)
                     
                     result = {
                         'kp_distance': kp_best,
