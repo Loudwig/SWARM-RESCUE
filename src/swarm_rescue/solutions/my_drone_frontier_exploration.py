@@ -118,6 +118,7 @@ class MyDroneFrontex(DroneAbstract):
         self.other_drones_pos = []
 
         self.history_health = deque(maxlen=10)
+        self.unexplored_point = None
     
     def reset_exploration_path_params(self):
         """
@@ -178,7 +179,7 @@ class MyDroneFrontex(DroneAbstract):
             return 0.5
     
     def control(self):
-        print(self.is_inside_return_area)
+        # print(self.is_inside_return_area)
         inKillZone =self.lidar().get_sensor_values() is None or self._drone_health<=0
 
         if not inKillZone : 
@@ -197,7 +198,8 @@ class MyDroneFrontex(DroneAbstract):
 
             is_near_rescuing_drone = self.check_near_rescuing_drone(threshold=GraspingParams.hampering_dist)
             if is_near_rescuing_drone:
-                print("Hampering a rescue, waiting...")
+                #print("Hampering a rescue, waiting...")
+                pass
 
             # TRANSITIONS OF THE STATE
             self.state_update(found_wall, found_wounded, found_rescue_center, is_near_rescuing_drone)
@@ -213,7 +215,7 @@ class MyDroneFrontex(DroneAbstract):
                 self.State.EXPLORING_FRONTIERS: lambda: self.handle_exploring_frontiers(is_near_rescue_center),
             }
 
-            print(self.identifier, self.state)
+            #print(self.identifier, self.state)
 
             self.visualise_actions()
 
@@ -320,32 +322,64 @@ class MyDroneFrontex(DroneAbstract):
 
         # 4. Construction de la matrice de coût : [num_drones x num_clusters]
         cost_matrix = np.zeros((num_drones, num_clusters))
+
+
+        if is_near_rescue_center : 
+            print("is near rescue center")
+            if self.elapsed_timestep/self._misc_data.max_timestep_limit > 0.001:
+        
+                print("Time elapsed")
+                # Définir le threshold pour considérer une cellule non explorée
+                threshold = -1.6 
+                ternary_map = self.grid.to_ternary_map()
+                grid_shape = ternary_map.shape
+                
+                # Éviter les bords pour la sélection des points aléatoires
+                # Garantir qu'on peut toujours prendre un cube 3x3 autour
+                padding = 1  # Pour le voisinage 3x3
+                
+                # Trouver un point non exploré
+                max_attempts = 20
+                self.unexplored_point = None
+                
+                for attempt in range(max_attempts):
+                    # Sélectionner un point aléatoire avec des marges sécurisées
+                    random_x = np.random.randint(padding, grid_shape[0]-padding)
+                    random_y = np.random.randint(padding, grid_shape[1]-padding)
+                    
+                    # Vérifier le voisinage 3x3
+                    neighborhood = ternary_map[random_x-1:random_x+2, random_y-1:random_y+2]
+                    avg_abs_value = np.mean(neighborhood)
+                    print(f"Average abs value: {avg_abs_value}")
+                    # Si la valeur moyenne est sous le seuil, considérer comme non exploré
+                    if avg_abs_value < threshold:
+                        print("Unexplored point found")
+                        unexplored_point = (random_x, random_y)
+                        self.unexplored_point = unexplored_point
+                        break
+
+    
+
+
+
         for i, drone_id in enumerate(drone_ids):
             drone_pos = drone_positions[drone_id]
             for j, cluster in enumerate(clusters):
                 cell_centroid = cluster.point_closest_to_centroid()
-                # Le coût est la distance à parcourir si jamais il prend le path du path qu'il va devoir prendre divisée par (taille du cluster + 1)
-                # cost_matrix[i, j] = self.path_distance(self.grid.compute_safest_path(
-                #     self.grid._conv_world_to_grid(*drone_pos),
-                #     cell_centroid,
-                #     self.path_params.max_inflation_obstacle
-                # )) /( (cluster.size()) + 1)
                 if is_near_rescue_center:
-                    cost_matrix[i, j] = math.dist(self.grid._conv_world_to_grid(*drone_pos), cell_centroid)
-                else:
+                    if self.unexplored_point is not None:
+                        cost_matrix[i, j] = math.dist(cell_centroid, self.unexplored_point)
+                    else : 
+                        cost_matrix[i, j] = math.dist(self.grid._conv_world_to_grid(*drone_pos), cell_centroid)
+                        
+                else : 
                     own_cell = self.grid._conv_world_to_grid(*drone_pos)
                     target_cell = self.grid._conv_world_to_grid(*cell_centroid)
                     if can_go_straight(*own_cell, *target_cell, self.grid.to_ternary_map()):
                         cost_matrix[i, j] = math.dist(self.grid._conv_world_to_grid(*drone_pos), cell_centroid)
                     else:
-                        cost_matrix[i, j] = math.dist(self.grid._conv_world_to_grid(*drone_pos), cell_centroid)*10**3
-
-                # cost_matrix[i,j] = self.path_distance(self.grid.compute_safest_path(
-                #     self.grid._conv_world_to_grid(*drone_pos),
-                #     cell_centroid,
-                #     0
-                # ))
-                # #print(cost_matrix[i, j])
+                        cost_matrix[i, j] = math.dist(self.grid._conv_world_to_grid(*drone_pos), cell_centroid)*10**3                
+                                
         # 5. Affectation via l'algorithme hongrois
         row_ind, col_ind = linear_sum_assignment(cost_matrix)
         assignments = {drone_ids[r]: clusters[col_ind[r]] for r in range(len(row_ind))}
@@ -442,7 +476,8 @@ class MyDroneFrontex(DroneAbstract):
             if (data.entity_type == DroneSemanticSensor.TypeEntity.RESCUE_CENTER):
                 found_rescue_center = True
                 angles_list.append(data.angle)
-                is_near_rescue_center = (data.distance < 30)
+                if data.distance < 50 : 
+                    is_near_rescue_center = True
                 best_angle_rescue_center = circular_mean(np.array(angles_list))
             
             # If the wounded person detected is held by nobody
@@ -741,6 +776,8 @@ class MyDroneFrontex(DroneAbstract):
         if self.visualisation_params.draw_path:
             self.draw_path(self.path)
 
+
+
         if self.state == self.State.EXPLORING_FRONTIERS:
             
             if self.visualisation_params.draw_frontier_points and self.next_frontier is not None:
@@ -753,6 +790,10 @@ class MyDroneFrontex(DroneAbstract):
 
             if self.visualisation_params.draw_frontier_centroid and self.next_frontier_centroid is not None:
                 self.draw_point(self.grid._conv_grid_to_world(*self.next_frontier_centroid) + self._half_size_array)     # frame of reference change
+
+            if self.unexplored_point is not None:
+                #print("VISUALISING")
+                self.draw_point(self.grid._conv_grid_to_world(*self.unexplored_point) + self._half_size_array, color=arcade.color.YELLOW)
 
     def visualise_actions(self):
         """
