@@ -301,7 +301,7 @@ def main():
     gui = GuiSR(playground=my_playground,
                 the_map=my_map,
                 draw_semantic_rays=True,
-                use_keyboard=False,
+                use_keyboard=True,
                 )
     gui.run()
 

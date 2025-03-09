@@ -283,7 +283,7 @@ class MyDroneFrontex(DroneAbstract):
 
         command = self.follow_path(self.path, found_and_near_wounded=True)
 
-        movement = math.dist(self.estimated_pose.position, self.last_position)
+        movement = math.dist(self.grid._conv_world_to_grid(*self.estimated_pose.position),self.last_position)
         if movement < 0.5:
             self.counter_static += 1
         else:

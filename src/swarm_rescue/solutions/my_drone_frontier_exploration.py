@@ -120,8 +120,11 @@ class MyDroneFrontex(DroneAbstract):
         self.other_drones_pos = []
 
         self.history_health = deque(maxlen=10)
+
+        self.counter_static = 0
+        self.last_position = None
         self.unexplored_point = None
-    
+
     def reset_exploration_path_params(self):
         """
         Resets the parameters related to the exploration path.
@@ -224,6 +227,10 @@ class MyDroneFrontex(DroneAbstract):
 
             self.visualise_actions()
 
+            if self.state == self.State.STOP:
+                print(self.drone_health)
+            self.last_position = self.grid._conv_world_to_grid(*self.estimated_pose.position)
+
             return state_handlers.get(self.state, self.handle_unknown_state)()
         
         else : 
@@ -269,7 +276,18 @@ class MyDroneFrontex(DroneAbstract):
                 self.plan_path_to_rescue_center()
             
             self.no_previous_gps = False
-            return self.follow_path(self.path, found_and_near_wounded=True)
+            command = self.follow_path(self.path, found_and_near_wounded=True)
+            movement = math.dist(self.grid._conv_world_to_grid(*self.estimated_pose.position), self.last_position)
+            if movement < 0.5:
+                print("on bouge pas gros")
+                self.counter_static += 1
+            else:
+                self.counter_static = 0
+            if self.counter_static > 100:
+                print("Grasper drone too static, exiting")
+                command["grasper"] = 0
+                self.counter_static = 0
+            return command
 
     def plan_path_to_rescue_center(self):
         start_cell = self.grid._conv_world_to_grid(*self.estimated_pose.position)
@@ -281,12 +299,23 @@ class MyDroneFrontex(DroneAbstract):
 
     def handle_going_rescue_center(self, epsilon_rescue_center, is_near_rescue_center):
         epsilon_rescue_center = normalize_angle(epsilon_rescue_center)
-        command = {"forward":  self.grasping_params.grasping_speed, "lateral": 0.0, "rotation": 0.0, "grasper": 1}
+        command = {"forward":  2*self.grasping_params.grasping_speed, "lateral": 0.0, "rotation": 0.0, "grasper": 1}
         command = self.pid_controller(command, epsilon_rescue_center, self.pid_params.Kp_angle, self.pid_params.Kd_angle, self.pid_params.Ki_angle, self.past_ten_errors_angle, "rotation")
 
         if is_near_rescue_center:
-            command["forward"] = -0.5
-            command["rotation"] = 1.0  # Rotate in place to drop off
+            command["forward"] = 0.0
+            movement = math.dist(self.grid._conv_world_to_grid(*self.estimated_pose.position), self.last_position)
+            if movement < 0.5:
+                print("on bouge pas gros")
+                self.counter_static += 1
+            else:
+                self.counter_static = 0
+            if self.counter_static > 20:
+                print("Grasper drone too static, exiting")
+                command["grasper"] = 0
+                command["rotation"] = 1.0
+                self.counter_static = 0
+            #command["rotation"] = 1.0  # Rotate in place to drop off
 
         return command
 
@@ -329,29 +358,29 @@ class MyDroneFrontex(DroneAbstract):
         cost_matrix = np.zeros((num_drones, num_clusters))
 
 
-        if is_near_rescue_center : 
+        if is_near_rescue_center :
             print("is near rescue center")
             if self.elapsed_timestep/self._misc_data.max_timestep_limit > 0.001:
-        
+
                 print("Time elapsed")
                 # Définir le threshold pour considérer une cellule non explorée
-                threshold = -1.6 
+                threshold = -1.6
                 ternary_map = self.grid.to_ternary_map()
                 grid_shape = ternary_map.shape
-                
+
                 # Éviter les bords pour la sélection des points aléatoires
                 # Garantir qu'on peut toujours prendre un cube 3x3 autour
                 padding = 1  # Pour le voisinage 3x3
-                
+
                 # Trouver un point non exploré
                 max_attempts = 20
                 self.unexplored_point = None
-                
+
                 for attempt in range(max_attempts):
                     # Sélectionner un point aléatoire avec des marges sécurisées
                     random_x = np.random.randint(padding, grid_shape[0]-padding)
                     random_y = np.random.randint(padding, grid_shape[1]-padding)
-                    
+
                     # Vérifier le voisinage 3x3
                     neighborhood = ternary_map[random_x-1:random_x+2, random_y-1:random_y+2]
                     avg_abs_value = np.mean(neighborhood)
@@ -363,7 +392,7 @@ class MyDroneFrontex(DroneAbstract):
                         self.unexplored_point = unexplored_point
                         break
 
-    
+
 
 
 
@@ -371,20 +400,26 @@ class MyDroneFrontex(DroneAbstract):
             drone_pos = drone_positions[drone_id]
             for j, cluster in enumerate(clusters):
                 cell_centroid = cluster.point_closest_to_centroid()
+                # Le coût est la distance à parcourir si jamais il prend le path du path qu'il va devoir prendre divisée par (taille du cluster + 1)
+                # cost_matrix[i, j] = self.path_distance(self.grid.compute_safest_path(
+                #     self.grid._conv_world_to_grid(*drone_pos),
+                #     cell_centroid,
+                #     self.path_params.max_inflation_obstacle
+                # )) /( (cluster.size()) + 1)
                 if is_near_rescue_center:
                     if self.unexplored_point is not None:
                         cost_matrix[i, j] = math.dist(cell_centroid, self.unexplored_point)
-                    else : 
+                    else :
                         cost_matrix[i, j] = math.dist(self.grid._conv_world_to_grid(*drone_pos), cell_centroid)
-                        
-                else : 
+
+                else :
                     own_cell = self.grid._conv_world_to_grid(*drone_pos)
                     target_cell = self.grid._conv_world_to_grid(*cell_centroid)
                     if can_go_straight(*own_cell, *target_cell, self.grid.to_ternary_map()):
                         cost_matrix[i, j] = math.dist(self.grid._conv_world_to_grid(*drone_pos), cell_centroid)
                     else:
-                        cost_matrix[i, j] = math.dist(self.grid._conv_world_to_grid(*drone_pos), cell_centroid)*10**3                
-                                
+                        cost_matrix[i, j] = math.dist(self.grid._conv_world_to_grid(*drone_pos), cell_centroid)*10**3
+
         # 5. Affectation via l'algorithme hongrois
         row_ind, col_ind = linear_sum_assignment(cost_matrix)
         assignments = {drone_ids[r]: clusters[col_ind[r]] for r in range(len(row_ind))}
@@ -481,7 +516,9 @@ class MyDroneFrontex(DroneAbstract):
             if (data.entity_type == DroneSemanticSensor.TypeEntity.RESCUE_CENTER):
                 found_rescue_center = True
                 angles_list.append(data.angle)
-                if data.distance < 50 : 
+                if data.distance<min_rescue_dist:
+                    min_rescue_dist = data.distance
+                if data.distance < 30.0:
                     is_near_rescue_center = True
                 best_angle_rescue_center = circular_mean(np.array(angles_list))
             
@@ -634,7 +671,7 @@ class MyDroneFrontex(DroneAbstract):
         return command_path
 
     def must_return_area(self):
-        return self.history_health[-1] < HealthParams.THRESHOLD_HEALTH or self.elapsed_timestep / self._misc_data.max_timestep_limit > 0.3
+        return self.history_health[-1] < HealthParams.THRESHOLD_HEALTH or self.elapsed_timestep / self._misc_data.max_timestep_limit > HealthParams.THRESHOLD_TIMESTEP
 
     def state_update(self, found_wall, found_wounded, found_rescue_center, is_near_rescuing_drone, must_return):
         """
@@ -723,7 +760,7 @@ class MyDroneFrontex(DroneAbstract):
             start_x, start_y = self.measured_gps_position() # never none ? 
             print(f"Initial position: {start_x}, {start_y}")
             self.grid.set_initial_cell(start_x, start_y)
-        
+            self.last_position = self.grid.initial_cell
 
         self.estimated_pose = Pose(np.asarray(self.measured_gps_position()),
                                    self.measured_compass_angle(),self.odometer_values(),self.previous_position[-1],self.previous_orientation[-1],self.size_area)

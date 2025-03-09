@@ -16,7 +16,7 @@ class WaitingStateParams:
 
 @dataclass
 class GraspingParams:
-    grasping_speed: float = 0.3
+    grasping_speed: float = 0.4
     grasping_dist: int = 30
     hampering_dist: int = 10
 
@@ -94,6 +94,7 @@ class BehaviourParams:
 @dataclass
 class HealthParams:
     THRESHOLD_HEALTH: int = 5
+    THRESHOLD_TIMESTEP: float = 0.8
 
 @dataclass
 class CommunicationParams:
