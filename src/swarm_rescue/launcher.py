@@ -17,6 +17,7 @@ from spg_overlay.gui_map.gui_sr import GuiSR
 from maps.map_intermediate_01 import MyMapIntermediate01
 from maps.map_intermediate_02 import MyMapIntermediate02
 from maps.map_final_2022_23 import MyMapFinal2022_23
+from maps.map_final_2023_24_03 import MyMapFinal_2023_24_03
 from maps.map_medium_01 import MyMapMedium01
 from maps.map_medium_02 import MyMapMedium02
 
@@ -77,7 +78,7 @@ class Launcher:
         """IF YOU WANT SPECIAL ZONES"""
 
         zones_config: ZonesConfig = (ZoneType.NO_GPS_ZONE, ZoneType.NO_COM_ZONE, ZoneType.KILL_ZONE)
-        eval_config = EvalConfig(map_type=MyMapFinal2022_23,zones_config=None, nb_rounds=1)
+        eval_config = EvalConfig(map_type=MyMapFinal_2023_24_03,zones_config=(), nb_rounds=1)
 
         """IF YOU WANT NO SPECIAL ZONES"""
         # eval_config = EvalConfig(map_type=MyMapbox, nb_rounds=1)

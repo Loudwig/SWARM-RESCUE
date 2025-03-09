@@ -135,7 +135,7 @@ class MyDroneFrontex(DroneAbstract):
         self.path = []
 
     def define_message_for_all(self):
-        inKillZone =self.lidar().get_sensor_values() is None or self._drone_health<=0
+        inKillZone =self.lidar().get_sensor_values() is None or self._drone_health<=0 or self.state == self.State.STOP
         message = []
         if self.timestep_count<=1 or inKillZone:
             return None
@@ -191,6 +191,9 @@ class MyDroneFrontex(DroneAbstract):
 
             self.timestep_count += 1
             self.history_health.append(self.drone_health)
+
+            if np.sum(np.diff(self.history_health) < 0)>4:
+                print(self.identifier,np.sum(np.diff(self.history_health) < 0))
             
             #if self.state not in [self.State.SEARCHING_RESCUE_CENTER,self.State.GOING_RESCUE_CENTER]:
             self.mapping(display=self.mapping_params.display_map)
@@ -228,7 +231,8 @@ class MyDroneFrontex(DroneAbstract):
             self.visualise_actions()
 
             if self.state == self.State.STOP:
-                print(self.drone_health)
+                pass
+                #print(self.drone_health)
             self.last_position = self.grid._conv_world_to_grid(*self.estimated_pose.position)
 
             return state_handlers.get(self.state, self.handle_unknown_state)()
@@ -308,12 +312,12 @@ class MyDroneFrontex(DroneAbstract):
             #command["rotation"] =
             movement = math.dist(self.grid._conv_world_to_grid(*self.estimated_pose.position), self.last_position)
             if movement < 0.5:
-                print("on bouge pas gros")
+                #print("on bouge pas gros")
                 self.counter_static += 1
             else:
                 self.counter_static = 0
             if self.counter_static > 20:
-                print("Grasper drone too static, exiting")
+                #print("Grasper drone too static, exiting")
                 command["grasper"] = 0
                 #command["forward"] = -1.0
                 #command["rotation"] = 1.0
@@ -361,10 +365,10 @@ class MyDroneFrontex(DroneAbstract):
 
 
         if is_near_rescue_center :
-            print("is near rescue center")
-            if self.elapsed_timestep/self._misc_data.max_timestep_limit > 0.001:
+            #print("is near rescue center")
+            if self.elapsed_timestep/self._misc_data.max_timestep_limit > 0.3:
 
-                print("Time elapsed")
+                #print("Time elapsed")
                 # Définir le threshold pour considérer une cellule non explorée
                 threshold = -1.6
                 ternary_map = self.grid.to_ternary_map()
@@ -386,10 +390,10 @@ class MyDroneFrontex(DroneAbstract):
                     # Vérifier le voisinage 3x3
                     neighborhood = ternary_map[random_x-1:random_x+2, random_y-1:random_y+2]
                     avg_abs_value = np.mean(neighborhood)
-                    print(f"Average abs value: {avg_abs_value}")
+                    #print(f"Average abs value: {avg_abs_value}")
                     # Si la valeur moyenne est sous le seuil, considérer comme non exploré
                     if avg_abs_value < threshold:
-                        print("Unexplored point found")
+                        #print("Unexplored point found")
                         unexplored_point = (random_x, random_y)
                         self.unexplored_point = unexplored_point
                         break
@@ -497,7 +501,7 @@ class MyDroneFrontex(DroneAbstract):
             distance = math.dist(own_cell,other_cell)
             # distance = np.linalg.norm(np.array(self.estimated_pose.position) - np.array(broadcast_loc))
             if distance < threshold and can_go_straight(*own_cell,*other_cell,self.grid.to_ternary_map()):
-                print("Near a rescuing drone")
+                #print("Near a rescuing drone")
                 return True
         return False
 
@@ -519,8 +523,6 @@ class MyDroneFrontex(DroneAbstract):
             if (data.entity_type == DroneSemanticSensor.TypeEntity.RESCUE_CENTER):
                 found_rescue_center = True
                 angles_list.append(data.angle)
-                if data.distance<min_rescue_dist:
-                    min_rescue_dist = data.distance
                 if data.distance < 45.0:
                     is_very_near_rescue_center = True
                 if data.distance < 80.0:
@@ -546,7 +548,7 @@ class MyDroneFrontex(DroneAbstract):
                 conflict = False
                 if np.linalg.norm(detection_position - np.array(wnd_locked[1])) < GraspingParams.hampering_dist : # adjust threshold as needed
                     conflict = True
-                    print("Conflict of wounded")
+                    #print("Conflict of wounded")
                     break
             if not conflict :
                 filtered_scores.append(score)
@@ -692,6 +694,7 @@ class MyDroneFrontex(DroneAbstract):
             "found_wall": found_wall,
             "lost_wall": not found_wall,
             "found_wounded": found_wounded,
+            "must_return_grasping_available": must_return and (not bool(self.base.grasper.grasped_entities)) and found_wounded,
             "holding_wounded": bool(self.base.grasper.grasped_entities),
             "lost_wounded": not found_wounded and not self.base.grasper.grasped_entities,
             "found_rescue_center": found_rescue_center and not (must_return and not bool(self.base.grasper.grasped_entities)),
@@ -699,7 +702,8 @@ class MyDroneFrontex(DroneAbstract):
             "no_frontiers_left": len(self.grid.frontiers) == 0,
             "waiting_time_over": self.step_waiting_count >= self.waiting_params.step_waiting,
             "is_near_rescuing_drone": is_near_rescuing_drone,
-            "gps_and_frontiers_left" : len(self.grid.frontiers) !=0 and self.estimated_pose.gps
+            "gps_and_frontiers_left" : len(self.grid.frontiers) !=0 and self.estimated_pose.gps,
+            "health_decreasing" : np.sum(np.diff(self.history_health) < 0)>4
         }
 
         STATE_TRANSITIONS = {
@@ -707,8 +711,8 @@ class MyDroneFrontex(DroneAbstract):
                 "no_longer_inside_return": self.State.SEARCHING_RESCUE_CENTER
             },
             self.State.WAITING: {
-                "is_and_must_inside_return": self.State.STOP,
                 "found_wounded": self.State.GRASPING_WOUNDED,
+                "is_and_must_inside_return": self.State.STOP,
                 "waiting_time_over": self.State.EXPLORING_FRONTIERS
             },
             self.State.GRASPING_WOUNDED: {
@@ -716,18 +720,21 @@ class MyDroneFrontex(DroneAbstract):
                 "holding_wounded": self.State.SEARCHING_RESCUE_CENTER
             },
             self.State.SEARCHING_RESCUE_CENTER: {
+                "must_return_grasping_available": self.State.GRASPING_WOUNDED,
                 "is_and_must_inside_return": self.State.STOP,
                 "lost_rescue_center": self.State.WAITING,
                 "found_rescue_center": self.State.GOING_RESCUE_CENTER
             },
             self.State.GOING_RESCUE_CENTER: {
                 "is_and_must_inside_return": self.State.STOP,
+                "no_longer_inside_return": self.State.SEARCHING_RESCUE_CENTER,
                 "lost_rescue_center": self.State.WAITING
             },
             self.State.EXPLORING_FRONTIERS: {
+                "found_wounded": self.State.GRASPING_WOUNDED,
                 "is_and_must_inside_return": self.State.STOP,
                 "must_return": self.State.SEARCHING_RESCUE_CENTER,
-                "found_wounded": self.State.GRASPING_WOUNDED,
+                "health_decreasing": self.State.WAITING,
                 "no_gps" : self.State.FOLLOWING_WALL,
                 "no_frontiers_left": self.State.FOLLOWING_WALL,
                 "is_near_rescuing_drone": self.State.WAITING
@@ -736,6 +743,7 @@ class MyDroneFrontex(DroneAbstract):
                 "is_and_must_inside_return": self.State.STOP,
                 "must_return": self.State.SEARCHING_RESCUE_CENTER,
                 "found_wounded": self.State.GRASPING_WOUNDED,
+                "health_decreasing": self.State.WAITING,
                 "found_wall": self.State.FOLLOWING_WALL,
                 "is_near_rescuing_drone": self.State.WAITING
             },
@@ -743,6 +751,7 @@ class MyDroneFrontex(DroneAbstract):
                 "is_and_must_inside_return": self.State.STOP,
                 "must_return": self.State.SEARCHING_RESCUE_CENTER,
                 "found_wounded": self.State.GRASPING_WOUNDED,
+                "health_decreasing": self.State.WAITING,
                 "lost_wall": self.State.SEARCHING_WALL,
                 "is_near_rescuing_drone": self.State.WAITING,
                 "gps_and_frontiers_left" : self.State.EXPLORING_FRONTIERS

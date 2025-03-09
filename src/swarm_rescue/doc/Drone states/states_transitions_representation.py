@@ -6,22 +6,37 @@ import os
 # COPY THE CODE OF THE STATE MACHINE FUNCTION HERE
 def state_update(self, found_wall, found_wounded, found_rescue_center):
         self.previous_state = self.state
-        
+
         conditions = {
+            "must_return": must_return,
+            "is_and_must_inside_return": self.is_inside_return_area and must_return and (
+                not bool(self.base.grasper.grasped_entities)),
+            "no_longer_inside_return": not self.is_inside_return_area and must_return,
+            "no_gps": not self.estimated_pose.gps,
             "found_wall": found_wall,
             "lost_wall": not found_wall,
             "found_wounded": found_wounded,
+            "must_return_grasping_available": must_return and (
+                not bool(self.base.grasper.grasped_entities)) and found_wounded,
             "holding_wounded": bool(self.base.grasper.grasped_entities),
             "lost_wounded": not found_wounded and not self.base.grasper.grasped_entities,
-            "found_rescue_center": found_rescue_center,
-            "lost_rescue_center": not self.base.grasper.grasped_entities,
+            "found_rescue_center": found_rescue_center and not (
+                        must_return and not bool(self.base.grasper.grasped_entities)),
+            "lost_rescue_center": not self.base.grasper.grasped_entities and not must_return,
             "no_frontiers_left": len(self.grid.frontiers) == 0,
-            "waiting_time_over": self.step_waiting_count >= self.waiting_params.step_waiting
+            "waiting_time_over": self.step_waiting_count >= self.waiting_params.step_waiting,
+            "is_near_rescuing_drone": is_near_rescuing_drone,
+            "gps_and_frontiers_left": len(self.grid.frontiers) != 0 and self.estimated_pose.gps,
+            "health_decreasing": np.sum(np.diff(self.history_health) < 0) > 4
         }
 
         STATE_TRANSITIONS = {
+            self.State.STOP: {
+                "no_longer_inside_return": self.State.SEARCHING_RESCUE_CENTER
+            },
             self.State.WAITING: {
                 "found_wounded": self.State.GRASPING_WOUNDED,
+                "is_and_must_inside_return": self.State.STOP,
                 "waiting_time_over": self.State.EXPLORING_FRONTIERS
             },
             self.State.GRASPING_WOUNDED: {
@@ -29,25 +44,44 @@ def state_update(self, found_wall, found_wounded, found_rescue_center):
                 "holding_wounded": self.State.SEARCHING_RESCUE_CENTER
             },
             self.State.SEARCHING_RESCUE_CENTER: {
+                "must_return_grasping_available": self.State.GRASPING_WOUNDED,
+                "is_and_must_inside_return": self.State.STOP,
                 "lost_rescue_center": self.State.WAITING,
                 "found_rescue_center": self.State.GOING_RESCUE_CENTER
             },
             self.State.GOING_RESCUE_CENTER: {
+                "is_and_must_inside_return": self.State.STOP,
+                "no_longer_inside_return": self.State.SEARCHING_RESCUE_CENTER,
                 "lost_rescue_center": self.State.WAITING
             },
             self.State.EXPLORING_FRONTIERS: {
                 "found_wounded": self.State.GRASPING_WOUNDED,
-                "no_frontiers_left": self.State.FOLLOWING_WALL
+                "is_and_must_inside_return": self.State.STOP,
+                "must_return": self.State.SEARCHING_RESCUE_CENTER,
+                "health_decreasing": self.State.WAITING,
+                "no_gps": self.State.FOLLOWING_WALL,
+                "no_frontiers_left": self.State.FOLLOWING_WALL,
+                "is_near_rescuing_drone": self.State.WAITING
             },
             self.State.SEARCHING_WALL: {
+                "is_and_must_inside_return": self.State.STOP,
+                "must_return": self.State.SEARCHING_RESCUE_CENTER,
                 "found_wounded": self.State.GRASPING_WOUNDED,
-                "found_wall": self.State.FOLLOWING_WALL
+                "health_decreasing": self.State.WAITING,
+                "found_wall": self.State.FOLLOWING_WALL,
+                "is_near_rescuing_drone": self.State.WAITING
             },
             self.State.FOLLOWING_WALL: {
+                "is_and_must_inside_return": self.State.STOP,
+                "must_return": self.State.SEARCHING_RESCUE_CENTER,
                 "found_wounded": self.State.GRASPING_WOUNDED,
-                "lost_wall": self.State.SEARCHING_WALL
+                "health_decreasing": self.State.WAITING,
+                "lost_wall": self.State.SEARCHING_WALL,
+                "is_near_rescuing_drone": self.State.WAITING,
+                "gps_and_frontiers_left": self.State.EXPLORING_FRONTIERS
             }
         }
+
 #####---------------------------------------------------------------------#####
 
 def extract_transitions(func):

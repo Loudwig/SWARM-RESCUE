@@ -47,7 +47,7 @@ class PIDParams:
 
 @dataclass
 class PathParams:
-    distance_close_waypoint: int = 20
+    distance_close_waypoint: int = 25
     max_inflation_obstacle: int = 5
 
 @dataclass

@@ -88,7 +88,8 @@ class MyMapFinal_2023_24_03(MapAbstract):
 
         # DISABLER ZONES
         if ZoneType.NO_GPS_ZONE in self._zones_config:
-            playground.add(self._no_gps_zone, self._no_gps_zone_pos)
+            #playground.add(self._no_gps_zone, self._no_gps_zone_pos)
+            pass
 
         # POSITIONS OF THE WOUNDED PERSONS
         for i in range(self._number_wounded_persons):

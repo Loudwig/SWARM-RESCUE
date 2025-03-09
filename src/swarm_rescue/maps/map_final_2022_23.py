@@ -62,7 +62,7 @@ class MyMapFinal2022_23(MapAbstract):
         self._wounded_persons: List[WoundedPerson] = []
 
         # POSITIONS OF THE DRONES
-        self._number_drones = 1
+        self._number_drones = 10
         # They are positioned in a square whose side size depends on the total number of drones.
         start_area_drones = (0, 217)
         nb_per_side = math.ceil(math.sqrt(float(self._number_drones)))
@@ -94,6 +94,9 @@ class MyMapFinal2022_23(MapAbstract):
         self._explored_map.initialize_walls(playground)
 
         # DISABLER ZONES
+        # self._kill_zone_pos = ((200, 217), 0)
+        # playground.add(self._kill_zone, self._kill_zone_pos)
+
         if ZoneType.NO_COM_ZONE in self._zones_config:
             playground.add(self._no_com_zone, self._no_com_zone_pos)
 
