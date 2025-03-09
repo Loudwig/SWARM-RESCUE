@@ -213,20 +213,12 @@ class Launcher:
         """
         ok = True
 
-        print(f"--------------------------------------------------------------------------------------------")
-
         for eval_config in self.eval_plan.list_eval_config:
             gc.collect()
-            print("")
 
             if not isinstance(eval_config.zones_config, Tuple) and not isinstance(eval_config.zones_config[0], Tuple):
                 raise ValueError("Invalid eval_config.zones_config. It should be a tuple of tuples of ZoneType.")
-
-            print(f"--------------------------------------------------------------------------------------------")
             for num_round in range(eval_config.nb_rounds):
-                print(f"--------------------------------------------------------------------------------------------")
-                print(f"* Map: {eval_config.map_name}, special zones: {eval_config.zones_name_casual}, "
-                      f"round: {num_round + 1}/{eval_config.nb_rounds}")
                 gc.collect()
                 result = self.one_round(eval_config, num_round + 1, hide_solution_output)
                 (percent_drones_destroyed, mean_drones_health, elapsed_timestep,
@@ -242,18 +234,6 @@ class Launcher:
 
                 mean_drones_health_percent = mean_drones_health / DRONE_INITIAL_HEALTH * 100.
 
-                print(
-                    f"\t* Round n°{num_round + 1}/{eval_config.nb_rounds}: "
-                    f"\n\t\trescued nb: {int(rescued_number)}/{self.number_wounded_persons}, "
-                    f"explor. score: {score_exploration:.1f}%, "
-                    f"health return score: {score_health_returned:.1f}%, "
-                    f"walltime elapsed: {elapsed_walltime:.0f}s/{self.max_walltime_limit}s, "
-                    f"elapse timestep: {elapsed_timestep}/{self.max_timestep_limit} steps, "
-                    f"time to rescue all: {full_rescue_timestep} steps."
-                    f"\n\t\tpercentage of drones destroyed: {percent_drones_destroyed:.1f} %, "
-                    f"mean percentage of drones health : {mean_drones_health_percent:.1f} %."
-                    f"\n\t\tround score: {round_score:.1f}%, "
-                    f"frequency: {elapsed_timestep / elapsed_walltime:.2f} steps/s.")
                 if is_max_walltime_limit_reached:
                     print(f"\t\tThe max walltime limit of {self.max_walltime_limit}s is reached first.")
 
@@ -277,8 +257,6 @@ class Launcher:
                     if stop_at_first_crash:
                         self.data_saver.generate_pdf_report()
                         return ok
-
-        print(f"--------------------------------------------------------------------------------------------")
         self.data_saver.generate_pdf_report()
 
         return ok
