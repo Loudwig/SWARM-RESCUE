@@ -75,6 +75,7 @@ class MyDronePidTranslation(DroneAbstract):
 
         if self.identifier == 0:  # with PD
             deriv_diff_position = diff_position - self.prev_diff_position
+            print(deriv_diff_position)
             Kp = 1.6
             Kd = 11.0
 

@@ -16,7 +16,7 @@ class WaitingStateParams:
 
 @dataclass
 class GraspingParams:
-    grasping_speed: float = 0.6
+    grasping_speed: float = 0.4
     grasping_dist: int = 30
     hampering_dist: int = 10
 
@@ -33,17 +33,17 @@ class PIDParams:
     Kp_angle_1: float = 9 / math.pi
     Kd_angle: float = Kp_angle / 10
     Kd_angle_1: float = Kp_angle / 10
-    Ki_angle: float = (1 / 10) * (1 / 20) * 2 / math.pi
+    Ki_angle: float = 0
     
     Kp_distance: float = 2 / abs(WallFollowingParams.dmax - WallFollowingParams.dist_to_stay)
-    Kp_distance_1 : float = 2 / abs(10)
-    Ki_distance: float = 1 / abs(WallFollowingParams.dist_to_stay) * 1 / 200
-    Ki_distance_1: float = 1 / abs(10) * 1 / 20 * 1 / 10
+    Kp_distance_1 : float = 0.31111111111 # for following path
+    Ki_distance: float = 0
+    Ki_distance_1: float = 0
     Kd_distance: float = 2 * Kp_distance
-    Kd_distance_1: float = 2 * Kp_distance_1
+    Kd_distance_1: float = 1.366666666666
 
-    Kp_distance_2: float = 10
-    Kd_distance_2: float = 0.01
+    Kp_distance_2: float = 1.6
+    Kd_distance_2: float = 11.0
 
 @dataclass
 class PathParams:

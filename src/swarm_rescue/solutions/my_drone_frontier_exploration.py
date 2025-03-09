@@ -71,6 +71,7 @@ class MyDroneFrontex(DroneAbstract):
         self.previous_orientation = deque(maxlen=1) 
         self.previous_orientation.append(0) 
         self.no_previous_gps = False
+        self.prev_diff_position = 0
 
         # STATE INITIALISATION
         self.state  = self.State.WAITING
@@ -128,7 +129,7 @@ class MyDroneFrontex(DroneAbstract):
         self.path = []
 
     def define_message_for_all(self):
-        inKillZone =self.lidar().get_sensor_values() is None 
+        inKillZone =self.lidar().get_sensor_values() is None or self._drone_health<=0
         message = []
         if self.timestep_count<=1 or inKillZone:
             return None
@@ -177,12 +178,13 @@ class MyDroneFrontex(DroneAbstract):
             return 0.5
     
     def control(self):
+        print(self.is_inside_return_area)
         inKillZone =self.lidar().get_sensor_values() is None or self._drone_health<=0
 
         if not inKillZone : 
 
             self.timestep_count += 1
-            self.history_health.append(self._drone_health)
+            self.history_health.append(self.drone_health)
             
             #if self.state not in [self.State.SEARCHING_RESCUE_CENTER,self.State.GOING_RESCUE_CENTER]:
             self.mapping(display=self.mapping_params.display_map)
@@ -272,7 +274,7 @@ class MyDroneFrontex(DroneAbstract):
 
     def handle_going_rescue_center(self, epsilon_rescue_center, is_near_rescue_center):
         epsilon_rescue_center = normalize_angle(epsilon_rescue_center)
-        command = {"forward": 3 * self.grasping_params.grasping_speed, "lateral": 0.0, "rotation": 0.0, "grasper": 1}
+        command = {"forward":  self.grasping_params.grasping_speed, "lateral": 0.0, "rotation": 0.0, "grasper": 1}
         command = self.pid_controller(command, epsilon_rescue_center, self.pid_params.Kp_angle, self.pid_params.Kd_angle, self.pid_params.Ki_angle, self.past_ten_errors_angle, "rotation")
 
         if is_near_rescue_center:
@@ -504,7 +506,7 @@ class MyDroneFrontex(DroneAbstract):
 
     # Takes the current relative error and with a PID controller, returns the command
     # mode : "rotation" or "lateral" for now could be speed or other if implemented
-    def pid_controller(self,command,epsilon,Kp,Kd,Ki,past_ten_errors,mode,command_slow = 0.8):
+    def pid_controller(self,command,epsilon,Kp,Kd,Ki,past_ten_errors,mode,command_slow = 0.8,grasping=False):
         
         past_ten_errors.pop(0)
         past_ten_errors.append(epsilon)
@@ -514,7 +516,9 @@ class MyDroneFrontex(DroneAbstract):
         elif mode == "lateral":
             deriv_epsilon = -np.sin(self.odometer_values()[1])*self.odometer_values()[0] # vitesse latérale
         elif mode == "forward" : 
-            deriv_epsilon = self.odometer_values()[0]*np.cos(self.odometer_values()[1]) # vitesse longitudinale
+            deriv_epsilon = epsilon - self.prev_diff_position
+            self.prev_diff_position = epsilon 
+            
         else : 
             raise ValueError("Mode not found")
         
@@ -523,6 +527,9 @@ class MyDroneFrontex(DroneAbstract):
         correction_integrale = 0
         #correction_integrale = Ki * sum(past_ten_errors)
         correction = correction_proportionnelle + correction_derivee + correction_integrale
+        if grasping and mode == "forward":
+            correction = 3*correction
+
         command[mode] = correction
         command[mode] = min( max(-1,correction) , 1 )
 
@@ -567,7 +574,7 @@ class MyDroneFrontex(DroneAbstract):
         dy = y - self.estimated_pose.position[1]
         epsilon = math.atan2(dy,dx) - self.estimated_pose.orientation
         epsilon = normalize_angle(epsilon)
-        command_path = self.pid_controller({"forward": 1,"lateral": 0.0,"rotation": 0.0,"grasper": 1 if found_and_near_wounded else 0},epsilon,self.pid_params.Kp_angle_1,self.pid_params.Kd_angle_1,self.pid_params.Ki_angle,self.past_ten_errors_angle,"rotation",0.5)
+        command_path = self.pid_controller({"forward": 0,"lateral": 0.0,"rotation": 0.0,"grasper": 1 if found_and_near_wounded else 0},epsilon,self.pid_params.Kp_angle_1,self.pid_params.Kd_angle_1,self.pid_params.Ki_angle,self.past_ten_errors_angle,"rotation",0.5)
 
         # ASSERVISSEMENT LATERAL
         if self.indice_current_waypoint == 0:
@@ -580,8 +587,9 @@ class MyDroneFrontex(DroneAbstract):
         command_path = self.pid_controller(command_path,epsilon_distance,self.pid_params.Kp_distance_1,self.pid_params.Kd_distance_1,self.pid_params.Ki_distance_1,self.past_ten_errors_distance,"lateral",0.5)
         
         # ASSERVISSENT EN DISTANCE 
-        epsilon_distance_to_waypoint = np.linalg.norm(np.array([x,y]) - self.estimated_pose.position)
-        # command_path = self.pid_controller(command_path,epsilon_distance_to_waypoint,self.pid_params.Kp_distance_2,self.pid_params.Kp_distance_2,self.pid_params.Ki_distance_1,self.past_ten_errors_distance,"forward",1)
+        diff_position = math.dist(np.array([x,y]), self.estimated_pose.position)
+
+        command_path = self.pid_controller(command_path,diff_position,self.pid_params.Kp_distance_2,self.pid_params.Kd_distance_2,self.pid_params.Ki_distance_1,self.past_ten_errors_distance,"forward",1,found_and_near_wounded)
 
         return command_path
 
@@ -752,3 +760,6 @@ class MyDroneFrontex(DroneAbstract):
         """
         self.draw_top_layer()
 
+
+
+    
