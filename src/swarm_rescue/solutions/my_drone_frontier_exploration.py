@@ -611,7 +611,8 @@ class MyDroneFrontex(DroneAbstract):
             "no_frontiers_left": len(self.grid.frontiers) == 0,
             "waiting_time_over": self.step_waiting_count >= self.waiting_params.step_waiting,
             "is_near_rescuing_drone": is_near_rescuing_drone,
-            "gps_and_frontiers_left" : len(self.grid.frontiers) !=0 and self.estimated_pose.gps
+            "gps_and_frontiers_left" : len(self.grid.frontiers) !=0 and self.estimated_pose.gps,
+            "stuck_collision" : all(self.history_health[i+1]<self.history_health[i] for i in range(len(self.history_health)-1)) # self.history_health is strictly decreasing
         }
 
         STATE_TRANSITIONS = {
@@ -631,6 +632,7 @@ class MyDroneFrontex(DroneAbstract):
                 "lost_rescue_center": self.State.WAITING
             },
             self.State.EXPLORING_FRONTIERS: {
+                "stuck_collision": self.State.WAITING,
                 "found_wounded": self.State.GRASPING_WOUNDED,
                 "no_gps" : self.State.FOLLOWING_WALL,
                 "no_frontiers_left": self.State.FOLLOWING_WALL,
