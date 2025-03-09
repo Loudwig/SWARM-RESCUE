@@ -27,8 +27,8 @@ from solutions.utils.dataclasses_config import *
 
 from scipy.optimize import linear_sum_assignment
 
-from swarm_rescue.solutions.utils.astar import can_go_straight
-from swarm_rescue.solutions.utils.dataclasses_config import GraspingParams
+
+
 
 
 class MyDroneFrontex(DroneAbstract):
@@ -70,6 +70,7 @@ class MyDroneFrontex(DroneAbstract):
         self.previous_position.append((0,0))  
         self.previous_orientation = deque(maxlen=1) 
         self.previous_orientation.append(0) 
+        self.no_previous_gps = False
 
         # STATE INITIALISATION
         self.state  = self.State.WAITING
@@ -205,12 +206,12 @@ class MyDroneFrontex(DroneAbstract):
                 self.State.SEARCHING_WALL: self.handle_searching_wall,
                 self.State.FOLLOWING_WALL: lambda: self.handle_following_wall(epsilon_wall_angle, min_dist),
                 self.State.GRASPING_WOUNDED: lambda: self.handle_grasping_wounded(min_dist_wnd, epsilon_wounded),
-                self.State.SEARCHING_RESCUE_CENTER: self.handle_searching_rescue_center,
+                self.State.SEARCHING_RESCUE_CENTER: lambda : self.handle_searching_rescue_center(epsilon_wall_angle,min_dist),
                 self.State.GOING_RESCUE_CENTER: lambda: self.handle_going_rescue_center(epsilon_rescue_center, is_near_rescue_center),
                 self.State.EXPLORING_FRONTIERS: lambda: self.handle_exploring_frontiers(is_near_rescue_center),
             }
 
-            # print(self.identifier, self.state)
+            print(self.identifier, self.state)
 
             self.visualise_actions()
 
@@ -228,13 +229,16 @@ class MyDroneFrontex(DroneAbstract):
     def handle_searching_wall(self):
         return {"forward": 0.5, "lateral": 0.0, "rotation": 0.0, "grasper": 0}
 
-    def handle_following_wall(self, epsilon_wall_angle, min_dist):
+    def handle_following_wall(self, epsilon_wall_angle, min_dist,rescuing=0):
         epsilon_wall_angle = normalize_angle(epsilon_wall_angle)
         epsilon_wall_distance = min_dist - self.wall_following_params.dist_to_stay
 
         self.logging_variables({"epsilon_wall_angle": epsilon_wall_angle, "epsilon_wall_distance": epsilon_wall_distance})
-
-        command = {"forward": self.wall_following_params.speed_following_wall, "lateral": 0.0, "rotation": 0.0, "grasper": 0}
+        if rescuing==1 : 
+            backwards = -1
+        else : 
+            backwards = 1
+        command = {"forward": backwards*self.wall_following_params.speed_following_wall, "lateral": 0.0, "rotation": 0.0, "grasper": rescuing}
         command = self.pid_controller(command, epsilon_wall_angle, self.pid_params.Kp_angle, self.pid_params.Kd_angle, self.pid_params.Ki_angle, self.past_ten_errors_angle, "rotation")
         command = self.pid_controller(command, epsilon_wall_distance, self.pid_params.Kp_distance, self.pid_params.Kd_distance, self.pid_params.Ki_distance, self.past_ten_errors_distance, "lateral")
 
@@ -246,16 +250,24 @@ class MyDroneFrontex(DroneAbstract):
         command = {"forward": self.grasping_params.grasping_speed, "lateral": 0.0, "rotation": 0.0, "grasper": 1 if score_wounded<GraspingParams().grasping_dist else 0}
         return self.pid_controller(command, epsilon_wounded, self.pid_params.Kp_angle, self.pid_params.Kd_angle, self.pid_params.Ki_angle, self.past_ten_errors_angle, "rotation")
 
-    def handle_searching_rescue_center(self):
-        if self.previous_state is not self.State.SEARCHING_RESCUE_CENTER:
-            self.plan_path_to_rescue_center()
-        return self.follow_path(self.path, found_and_near_wounded=True)
+    def handle_searching_rescue_center(self,epsilon_wall_angle,min_dist):
+        if not self.estimated_pose.gps and len(self.path)==0:   
+            self.no_previous_gps = True
+            #print("no gps and searching RC")
+            return self.handle_following_wall(epsilon_wall_angle,min_dist,1)
+        else : 
+            if self.previous_state is not self.State.SEARCHING_RESCUE_CENTER or self.no_previous_gps :
+                self.plan_path_to_rescue_center()
+            
+            self.no_previous_gps = False
+            return self.follow_path(self.path, found_and_near_wounded=True)
 
     def plan_path_to_rescue_center(self):
         start_cell = self.grid._conv_world_to_grid(*self.estimated_pose.position)
         target_cell = self.grid.initial_cell
         max_inflation = self.path_params.max_inflation_obstacle
         self.path = self.grid.compute_safest_path(start_cell, target_cell, max_inflation)
+        #print(self.path)
         self.indice_current_waypoint = 0
 
     def handle_going_rescue_center(self, epsilon_rescue_center, is_near_rescue_center):
@@ -580,6 +592,7 @@ class MyDroneFrontex(DroneAbstract):
         self.previous_state = self.state
         
         conditions = {
+            "no_gps" : not self.estimated_pose.gps,
             "found_wall": found_wall,
             "lost_wall": not found_wall,
             "found_wounded": found_wounded,
@@ -589,7 +602,8 @@ class MyDroneFrontex(DroneAbstract):
             "lost_rescue_center": not self.base.grasper.grasped_entities,
             "no_frontiers_left": len(self.grid.frontiers) == 0,
             "waiting_time_over": self.step_waiting_count >= self.waiting_params.step_waiting,
-            "is_near_rescuing_drone": is_near_rescuing_drone
+            "is_near_rescuing_drone": is_near_rescuing_drone,
+            "gps_and_frontiers_left" : len(self.grid.frontiers) !=0 and self.estimated_pose.gps
         }
 
         STATE_TRANSITIONS = {
@@ -610,6 +624,7 @@ class MyDroneFrontex(DroneAbstract):
             },
             self.State.EXPLORING_FRONTIERS: {
                 "found_wounded": self.State.GRASPING_WOUNDED,
+                "no_gps" : self.State.FOLLOWING_WALL,
                 "no_frontiers_left": self.State.FOLLOWING_WALL,
                 "is_near_rescuing_drone": self.State.WAITING
             },
@@ -621,7 +636,8 @@ class MyDroneFrontex(DroneAbstract):
             self.State.FOLLOWING_WALL: {
                 "found_wounded": self.State.GRASPING_WOUNDED,
                 "lost_wall": self.State.SEARCHING_WALL,
-                "is_near_rescuing_drone": self.State.WAITING
+                "is_near_rescuing_drone": self.State.WAITING,
+                "gps_and_frontiers_left" : self.State.EXPLORING_FRONTIERS
             }
         }
 
@@ -649,7 +665,8 @@ class MyDroneFrontex(DroneAbstract):
         self.previous_position.append(self.estimated_pose.position)
         self.previous_orientation.append(self.estimated_pose.orientation)
         
-        self.grid.update(pose=self.estimated_pose)
+        if self.estimated_pose.gps : 
+            self.grid.update(pose=self.estimated_pose)
         
         if display and (self.timestep_count % 5 == 0):
              self.grid.display(self.grid.to_ternary_map(),

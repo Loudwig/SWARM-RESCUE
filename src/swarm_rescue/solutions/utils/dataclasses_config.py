@@ -16,14 +16,14 @@ class WaitingStateParams:
 
 @dataclass
 class GraspingParams:
-    grasping_speed: float = 0.3
+    grasping_speed: float = 0.6
     grasping_dist: int = 30
     hampering_dist: int = 10
 
 @dataclass
 class WallFollowingParams:
     dmax: int = 60
-    dist_to_stay: int = 40
+    dist_to_stay: int = 20
     speed_following_wall: float = 0.3
     speed_turning: float = 0.05
 

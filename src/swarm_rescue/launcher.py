@@ -26,7 +26,7 @@ from map_editor.map_test2 import MyMaptest2
 from map_editor.map_test3 import MyMaptest3
 from map_editor.map_box import MyMapbox
 from map_editor.map_KillZoneTest import MyMapKillZoneTest
-
+from map_editor.map_NOGPS import MyMapNOGPS
 from solutions.my_drone_random import MyDroneRandom
 from solutions.my_drone_frontier_exploration import MyDroneFrontex
 
@@ -76,8 +76,8 @@ class Launcher:
 
         """IF YOU WANT SPECIAL ZONES"""
 
-        #zones_config: ZonesConfig = (ZoneType.NO_COM_ZONE, ZoneType.NO_GPS_ZONE, ZoneType.KILL_ZONE)
-        eval_config = EvalConfig(map_type=MyMapFinal2022_23,zones_config=None, nb_rounds=1)
+        zones_config: ZonesConfig = (ZoneType.NO_GPS_ZONE, ZoneType.NO_COM_ZONE, ZoneType.KILL_ZONE)
+        eval_config = EvalConfig(map_type=MyMapFinal2022_23,zones_config=zones_config, nb_rounds=1)
 
         """IF YOU WANT NO SPECIAL ZONES"""
         # eval_config = EvalConfig(map_type=MyMapbox, nb_rounds=1)
