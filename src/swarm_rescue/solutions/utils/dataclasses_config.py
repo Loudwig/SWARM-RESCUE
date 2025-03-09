@@ -57,9 +57,9 @@ class PIDParams:
     #Ki_lateral: float = 1 / abs(10) * 1 / 20 * 1 / 10
     #Kd_lateral: float = 2 * Kp_lateral
 
-    Kp_forward: float = 1.6
+    Kp_forward : float = 1.6
     Kd_forward: float = 11.0
-    Ki_forward: float = 0.0
+    Ki_forward: float = 0
 
 @dataclass
 class PathParams:
