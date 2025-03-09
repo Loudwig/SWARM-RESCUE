@@ -53,6 +53,10 @@ class PIDParams:
     Kd_distance: float = 1.3667
     Ki_distance: float = 0.0
 
+    #Kp_distance : float = 2 / abs(10)
+    #Ki_distance: float = 1 / abs(10) * 1 / 20 * 1 / 10
+    #Kd_distance: float = 2 * Kp_distance
+
 @dataclass
 class PathParams:
     distance_close_waypoint: int = 20

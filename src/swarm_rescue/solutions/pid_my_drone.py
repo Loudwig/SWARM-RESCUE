@@ -23,7 +23,7 @@ from solutions.utils.dataclasses_config import *
 from solutions.utils.exploration_tracker import *
 
 # Paths
-import path_creator.path1
+import path_creator.path2
 
 class MyDronePID(DroneAbstract):
     class State(Enum):
@@ -60,7 +60,7 @@ class MyDronePID(DroneAbstract):
         self.inital_point_path = (0,0)
         self.finished_path = False
 ###########################PATH CHOICE##########################
-        self.path = path_creator.path1.path
+        self.path = path_creator.path2.path
 ###########################PATH CHOICE##########################
         self.path_grid = []
 
