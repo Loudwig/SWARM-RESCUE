@@ -16,14 +16,14 @@ class WaitingStateParams:
 
 @dataclass
 class WaitingDepartureStateParams:
-    size_drone_group: int = 3
-    interval_departure: int = 150
+    size_drone_group: int = 1
+    interval_departure: int = 0.6
 
 @dataclass
 class GraspingParams:
     grasping_speed: float = 0.5
     grasping_dist: int = 30
-    hampering_dist: int = 5
+    hampering_dist: int = 8
 
 @dataclass
 class WallFollowingParams:
@@ -54,6 +54,7 @@ class PIDParams:
 class PathParams:
     distance_close_waypoint: int = 25
     max_inflation_obstacle: int = 5
+    max_inflation_grasping: int = 7
 
 @dataclass
 class LogParams:
@@ -99,7 +100,7 @@ class BehaviourParams:
 @dataclass
 class HealthParams:
     THRESHOLD_HEALTH: int = 5
-    THRESHOLD_TIMESTEP: float = 0.5
+    THRESHOLD_TIMESTEP: float = 0.9
 
 @dataclass
 class CommunicationParams:
