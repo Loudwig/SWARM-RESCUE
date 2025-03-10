@@ -65,9 +65,9 @@ class LogParams:
 
 @dataclass
 class VisualisationParams:
-    draw_path: bool = True
-    draw_frontier_centroid: bool = True
-    draw_frontier_points: bool = True
+    draw_path: bool = False
+    draw_frontier_centroid: bool = False
+    draw_frontier_points: bool = False
 
 @dataclass  # Relative to grids.py
 class GridParams:
