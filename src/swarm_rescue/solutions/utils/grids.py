@@ -4,7 +4,6 @@ import cv2
 from spg_overlay.utils.constants import MAX_RANGE_LIDAR_SENSOR
 from solutions.utils.pose import Pose
 from spg_overlay.utils.grid import Grid
-from solutions.utils.messages import DroneMessage
 from solutions.utils.astar import *
 from spg_overlay.entities.drone_distance_sensors import DroneSemanticSensor
 from solutions.utils.dataclasses_config import *
@@ -38,8 +37,6 @@ class OccupancyGrid(Grid):
                 return None
             return np.mean(self.cells, axis=0).astype(int)
 
-            # x_coords, y_coords = zip(*self.cells)
-            # return np.array([sum(x_coords) / len(x_coords), sum(y_coords) / len(y_coords)], dtype=int)
 
         def point_closest_to_centroid(self):
             "compute the cell closest to the centroid"
@@ -106,20 +103,6 @@ class OccupancyGrid(Grid):
         ternary_map[abs(self.grid) <=  OBSTACLE_THRESHOLD] = self.UNDISCOVERED
         return ternary_map
 
-    def to_median_map(self):
-        median_map = np.zeros_like(self.grid,dtype=int)
-        copy = np.float32(self.grid)
-        filtered = cv2.medianBlur(copy,3,)
-
-        seuil = 4
-        median_map[filtered > seuil] = self.OBSTACLE
-        median_map[filtered< -seuil] = self.FREE
-        median_map[ abs(filtered) <= seuil] = self.UNDISCOVERED 
-        return median_map
-        
-
-
-
     def to_binary_map(self):
         """
         Convert the probabilistic occupancy grid into a ternary grid.
@@ -130,7 +113,6 @@ class OccupancyGrid(Grid):
         Cells with value < FREE_THRESHOLD are considered free.
         Cells with value = 0 are considered undiscovered
         """
-        #print(np.count_nonzero(self.grid < 0))
         binary_map = np.zeros_like(self.grid, dtype=int)
         binary_map[self.grid > 2] = self.OBSTACLE
         binary_map[abs(self.grid) <= 2] = self.UNDISCOVERED
@@ -171,23 +153,18 @@ class OccupancyGrid(Grid):
         for pt_x, pt_y in zip(points_x, points_y):
             self.add_value_along_line(pose.position[0], pose.position[1], pt_x, pt_y, EMPTY_ZONE_VALUE)
 
-
-
         # Rays that collide obstacles are those that verify lidar_dist[ray] < max_confidence_range
         select_collision = lidar_dist < no_obstacle_ray_distance_threshold 
         
         points_x = pose.position[0] + np.multiply(lidar_dist, cos_rays)
         points_y = pose.position[1] + np.multiply(lidar_dist, sin_rays)
-        
-        if BehaviourParams().try_not_couting_drone_as_obstacle: 
-                # print(len(select_collision))
-                zone_drone_x , zone_drone_y = self.compute_near_drones_zone(pose)
-                epsilon = 3
-                for ind,v in enumerate(select_collision):
-                    if select_collision[ind] == True:
-                        if self.list_any_comparaison_int(abs(zone_drone_x - points_x[ind]),epsilon) and self.list_any_comparaison_int(abs(zone_drone_y - points_y[ind]),epsilon): 
-                            # print("NEAR ZONE DRONE")
-                            select_collision[ind] =  False
+
+        zone_drone_x , zone_drone_y = self.compute_near_drones_zone(pose)
+        epsilon = 3
+        for ind,v in enumerate(select_collision):
+            if select_collision[ind] == True:
+                if self.list_any_comparison_int(abs(zone_drone_x - points_x[ind]),epsilon) and self.list_any_comparison_int(abs(zone_drone_y - points_y[ind]),epsilon):
+                    select_collision[ind] =  False
         
         points_x = points_x[select_collision]
         points_y = points_y[select_collision]
@@ -203,47 +180,35 @@ class OccupancyGrid(Grid):
                                       interpolation=cv2.INTER_NEAREST)
 
     def frontiers_update(self):
-                # Get the ternary map (FREE = 0, UNDISCOVERED = -2, OBSTACLE = 1)
         ternary_map = self.to_ternary_map()
         rows, cols = ternary_map.shape
 
-        # Parameter: number of cells to look ahead past the unknown cell
-        threshold = 2  # adjust this value as needed
+        threshold = 2
 
-        # Create a boolean mask for valid frontier cells
         frontier_mask = np.zeros_like(ternary_map, dtype=bool)
 
-        # Define directions for 4-connected neighborhood (adjust to 8-connected if desired)
         directions = [(0, 1), (1, 0), (0, -1), (-1, 0)]
 
-        # Loop over every cell in the map
         for i in range(rows):
             for j in range(cols):
-                # Only consider free cells
                 if ternary_map[i, j] != 0:
                     continue
 
                 candidate_found = False
                 valid_candidate = True
 
-                # Check each neighboring cell in the defined directions
                 for di, dj in directions:
                     ni, nj = i + di, j + dj
-                    # Check bounds
                     if ni < 0 or ni >= rows or nj < 0 or nj >= cols:
                         continue
 
-                    # Look for an unknown neighbor
                     if ternary_map[ni, nj] == -2:
                         candidate_found = True
-                        # Look ahead beyond the unknown cell up to the threshold
                         for step in range(1, threshold + 1):
                             check_i = i + di * (step + 1)
                             check_j = j + dj * (step + 1)
-                            # If out-of-bounds, we stop checking this direction
                             if check_i < 0 or check_i >= rows or check_j < 0 or check_j >= cols:
                                 break
-                            # If an obstacle is encountered within the threshold, reject the candidate
                             if ternary_map[check_i, check_j] == 1:
                                 valid_candidate = False
                                 break
@@ -363,7 +328,7 @@ class OccupancyGrid(Grid):
                 zone_drone_y.append(pose.position[1] + np.multiply(data.distance, sin_rays))
         return zone_drone_x,zone_drone_y
     
-    def list_any_comparaison_int(self,L,i):
+    def list_any_comparison_int(self,L,i):
         for x in L : 
             if x < i : return True
         return False

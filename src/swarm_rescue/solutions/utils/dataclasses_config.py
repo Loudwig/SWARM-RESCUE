@@ -94,10 +94,6 @@ class GridParams:
     OBSTACLE_THRESHOLD: float = 4
 
 @dataclass
-class BehaviourParams:
-    try_not_couting_drone_as_obstacle: bool = True
-
-@dataclass
 class HealthParams:
     THRESHOLD_HEALTH: int = 5
     THRESHOLD_TIMESTEP: float = 0.9

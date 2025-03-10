@@ -1,7 +1,6 @@
 import heapq
 import math
 import copy
-import numpy as np
 
 def octile_heuristic(a, b):
     """

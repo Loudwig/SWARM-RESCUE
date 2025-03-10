@@ -28,7 +28,6 @@ from map_editor.map_test3 import MyMaptest3
 from map_editor.map_box import MyMapbox
 from map_editor.map_KillZoneTest import MyMapKillZoneTest
 from map_editor.map_NOGPS import MyMapNOGPS
-from solutions.my_drone_random import MyDroneRandom
 from solutions.my_drone_frontier_exploration import MyDroneFrontex
 
 class MyDrone(MyDroneFrontex):
