@@ -20,9 +20,6 @@ from solutions.utils.messages import DroneMessage
 from solutions.utils.grids import *
 from solutions.utils.dataclasses_config import *
 
-from swarm_rescue.solutions.utils.dataclasses_config import WallFollowingParams, PIDParams, GraspingParams, PathParams, \
-    WaitingStateParams, VisualisationParams, MappingParams
-
 
 class MyDroneFrontex(DroneAbstract):
     class State(Enum):
@@ -274,7 +271,6 @@ class MyDroneFrontex(DroneAbstract):
         epsilon_wall_angle = normalize_angle(epsilon_wall_angle)
         epsilon_wall_distance = min_dist - WallFollowingParams.dist_to_stay
 
-        self.logging_variables({"epsilon_wall_angle": epsilon_wall_angle, "epsilon_wall_distance": epsilon_wall_distance})
         if rescuing==1 : 
             backwards = -1
         else : 

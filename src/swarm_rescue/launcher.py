@@ -17,20 +17,13 @@ from spg_overlay.gui_map.gui_sr import GuiSR
 from maps.map_intermediate_01 import MyMapIntermediate01
 from maps.map_intermediate_02 import MyMapIntermediate02
 from maps.map_final_2022_23 import MyMapFinal2022_23
-from maps.map_final_2023_24_03 import MyMapFinal_2023_24_03
 from maps.map_medium_01 import MyMapMedium01
 from maps.map_medium_02 import MyMapMedium02
 
-# Test map_editor
-from map_editor.map_test import MyMaptest
-from map_editor.map_test2 import MyMaptest2
-from map_editor.map_test3 import MyMaptest3
-from map_editor.map_box import MyMapbox
-from map_editor.map_KillZoneTest import MyMapKillZoneTest
-from map_editor.map_NOGPS import MyMapNOGPS
-from solutions.my_drone_frontier_exploration import MyDroneFrontex
+from solutions.my_drone_eval import MyDroneEval
 
-class MyDrone(MyDroneFrontex):
+
+class MyDrone(MyDroneEval):
     pass
 
 
@@ -74,29 +67,23 @@ class Launcher:
         self.team_info = TeamInfo()
         self.eval_plan = EvalPlan()
 
-        """IF YOU WANT SPECIAL ZONES"""
-
-        zones_config: ZonesConfig = (ZoneType.NO_GPS_ZONE, ZoneType.NO_COM_ZONE, ZoneType.KILL_ZONE)
-        eval_config = EvalConfig(map_type=MyMapFinal_2023_24_03,zones_config=(), nb_rounds=1)
-
-        """IF YOU WANT NO SPECIAL ZONES"""
-        # eval_config = EvalConfig(map_type=MyMapbox, nb_rounds=1)
-
+        eval_config = EvalConfig(map_type=MyMapIntermediate01, nb_rounds=2)
         self.eval_plan.add(eval_config=eval_config)
 
-        # eval_config = EvalConfig(map_type=MyMapIntermediate02)
-        # self.eval_plan.add(eval_config=eval_config)
+        eval_config = EvalConfig(map_type=MyMapIntermediate02)
+        self.eval_plan.add(eval_config=eval_config)
 
-        # zones_config: ZonesConfig = ()
-        # eval_config = EvalConfig(map_type=MyMapMedium01, zones_config=zones_config, nb_rounds=1, config_weight=1)
-        # self.eval_plan.add(eval_config=eval_config)
+        zones_config: ZonesConfig = ()
+        eval_config = EvalConfig(map_type=MyMapMedium01, zones_config=zones_config, nb_rounds=1, config_weight=1)
+        self.eval_plan.add(eval_config=eval_config)
 
-        # eval_config = EvalConfig(map_type=MyMapMedium01, zones_config=zones_config, nb_rounds=1, config_weight=1)
-        # self.eval_plan.add(eval_config=eval_config)
+        zones_config: ZonesConfig = (ZoneType.NO_COM_ZONE, ZoneType.NO_GPS_ZONE, ZoneType.KILL_ZONE)
+        eval_config = EvalConfig(map_type=MyMapMedium01, zones_config=zones_config, nb_rounds=1, config_weight=1)
+        self.eval_plan.add(eval_config=eval_config)
 
-        # zones_config: ZonesConfig = (ZoneType.NO_COM_ZONE, ZoneType.NO_GPS_ZONE, ZoneType.KILL_ZONE)
-        # eval_config = EvalConfig(map_type=MyMapMedium02, zones_config=zones_config, nb_rounds=1, config_weight=1)
-        # self.eval_plan.add(eval_config=eval_config)
+        zones_config: ZonesConfig = (ZoneType.NO_COM_ZONE, ZoneType.NO_GPS_ZONE, ZoneType.KILL_ZONE)
+        eval_config = EvalConfig(map_type=MyMapMedium02, zones_config=zones_config, nb_rounds=1, config_weight=1)
+        self.eval_plan.add(eval_config=eval_config)
 
         self.number_drones = None
         self.max_timestep_limit = None
@@ -161,9 +148,7 @@ class Launcher:
 
         my_gui = GuiSR(playground=my_playground,
                        the_map=my_map,
-                       use_keyboard=True,
                        draw_interactive=False,
-                       enable_visu_noises=False,
                        filename_video_capture=filename_video_capture)
 
         window_title = (f"Team: {self.team_info.team_number_str}   -   "
