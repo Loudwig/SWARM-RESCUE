@@ -13,6 +13,7 @@ class MappingParams:
 @dataclass
 class WaitingStateParams:
     step_waiting: int = 20
+    step_deadlock: int = 200
 
 @dataclass
 class WaitingDepartureStateParams:
@@ -28,7 +29,7 @@ class GraspingParams:
 @dataclass
 class WallFollowingParams:
     dmax: int = 60
-    dist_to_stay: int = 20
+    dist_to_stay: int = 30
     speed_following_wall: float = 0.3
     speed_turning: float = 0.05
 

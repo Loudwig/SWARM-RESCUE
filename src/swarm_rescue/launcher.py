@@ -19,6 +19,7 @@ from maps.map_intermediate_02 import MyMapIntermediate02
 from maps.map_final_2022_23 import MyMapFinal2022_23
 from maps.map_medium_01 import MyMapMedium01
 from maps.map_medium_02 import MyMapMedium02
+from map_editor.map_NOGPS import MyMapNOGPS
 
 from solutions.my_drone_eval import MyDroneEval
 
@@ -67,7 +68,8 @@ class Launcher:
         self.team_info = TeamInfo()
         self.eval_plan = EvalPlan()
 
-        eval_config = EvalConfig(map_type=MyMapIntermediate01, nb_rounds=2)
+        zones_config: ZonesConfig = (ZoneType.NO_COM_ZONE, ZoneType.NO_GPS_ZONE, ZoneType.KILL_ZONE)
+        eval_config = EvalConfig(map_type=MyMapNOGPS, nb_rounds=2, zones_config=zones_config)
         self.eval_plan.add(eval_config=eval_config)
 
         eval_config = EvalConfig(map_type=MyMapIntermediate02)
@@ -149,7 +151,8 @@ class Launcher:
         my_gui = GuiSR(playground=my_playground,
                        the_map=my_map,
                        draw_interactive=False,
-                       filename_video_capture=filename_video_capture)
+                       filename_video_capture=filename_video_capture,
+                        use_keyboard=True)
 
         window_title = (f"Team: {self.team_info.team_number_str}   -   "
                         f"Map: {type(my_map).__name__}   -   "

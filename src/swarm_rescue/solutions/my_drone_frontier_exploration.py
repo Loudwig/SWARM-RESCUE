@@ -20,6 +20,9 @@ from solutions.utils.messages import DroneMessage
 from solutions.utils.grids import *
 from solutions.utils.dataclasses_config import *
 
+from swarm_rescue.solutions.utils.astar import can_go_straight
+from swarm_rescue.solutions.utils.dataclasses_config import WallFollowingParams, WaitingStateParams
+
 
 class MyDroneFrontex(DroneAbstract):
     class State(Enum):
@@ -27,7 +30,8 @@ class MyDroneFrontex(DroneAbstract):
         All the states of the drone as a state machine
         """
         WAITING = auto()        # Assigns 1
-        WAITING_DEPARTURE = auto()      # Assigns 2 etc ... This allows to easily add new states
+        DEADLOCK = auto()       # Assigns 2 etc ... This allows to easily add new states
+        WAITING_DEPARTURE = auto()
 
         SEARCHING_WALL = auto()
         FOLLOWING_WALL = auto()
@@ -37,6 +41,7 @@ class MyDroneFrontex(DroneAbstract):
         GRASPING_WOUNDED = auto()
         SEARCHING_RESCUE_CENTER = auto()
         GOING_RESCUE_CENTER = auto()
+        GRASPING_FOLLOWING_WALL = auto()
 
         SEARCHING_RETURN_AREA = auto()
         GOING_RETURN_AREA = auto()
@@ -61,9 +66,9 @@ class MyDroneFrontex(DroneAbstract):
         self.previous_position = deque(maxlen=1) 
         self.previous_position.append((0,0))  
         self.previous_orientation = deque(maxlen=1) 
-        self.previous_orientation.append(0) 
-        self.no_previous_gps = False
+        self.previous_orientation.append(0)
         self.prev_diff_position = 0
+        self.history_forward_epsilon = deque(maxlen=50)
 
         # STATE INITIALISATION
         self.state  = self.State.WAITING_DEPARTURE
@@ -74,6 +79,7 @@ class MyDroneFrontex(DroneAbstract):
 
             # WAITING STATE
         self.step_waiting_count = 0
+        self.step_deadlock_count = 0
 
             # WAITING DEPARTURE STATE
         self.all_drones_departure_score = []
@@ -103,6 +109,7 @@ class MyDroneFrontex(DroneAbstract):
         self.other_drones_pos = []
 
         self.history_health = deque(maxlen=50)
+        self.history_path_searching = deque([False]*10, maxlen=10)
 
         self.counter_static = 0
         self.last_position = None
@@ -186,6 +193,8 @@ class MyDroneFrontex(DroneAbstract):
 
         if not inKillZone :
             self.history_health.append(self.drone_health)
+            self.history_forward_epsilon.append(self.odometer_values()[0] * np.cos(self.odometer_values()[1]))
+            self.history_path_searching.append(False)
             self.mapping(display=MappingParams.display_map)
             self.communication_management()
 
@@ -206,12 +215,15 @@ class MyDroneFrontex(DroneAbstract):
             # Execute Corresponding Command
             state_handlers = {
                 self.State.WAITING: self.handle_waiting,
+                self.State.DEADLOCK: self.handle_deadlock,
                 self.State.WAITING_DEPARTURE: self.handle_waiting_departure,
                 self.State.SEARCHING_WALL: self.handle_searching_wall,
                 self.State.FOLLOWING_WALL: lambda: self.handle_following_wall(epsilon_wall_angle, min_dist),
+                self.State.FOLLOWING_WALL: lambda: self.handle_following_wall(epsilon_wall_angle, min_dist),
                 self.State.GRASPING_WOUNDED: lambda: self.handle_grasping_wounded(min_dist_wnd, epsilon_wounded),
-                self.State.SEARCHING_RESCUE_CENTER: lambda : self.handle_searching_rescue_center(epsilon_wall_angle,min_dist),
+                self.State.SEARCHING_RESCUE_CENTER: self.handle_searching_rescue_center,
                 self.State.GOING_RESCUE_CENTER: lambda: self.handle_going_rescue_center(epsilon_rescue_center, is_very_near_rescue_center),
+                self.State.GRASPING_FOLLOWING_WALL: lambda: self.handle_grasping_following_wall(epsilon_wall_angle, min_dist),
                 self.State.EXPLORING_FRONTIERS: lambda: self.handle_exploring_frontiers(is_near_rescue_center),
                 self.State.STOP: lambda: {"forward": 0.0, "lateral": 0.0, "rotation": 0.0, "grasper": 0},
             }
@@ -233,6 +245,11 @@ class MyDroneFrontex(DroneAbstract):
         self.reset_exploration_path_params()
         self.step_waiting_count += 1
         return {"forward": 0.0, "lateral": 0.0, "rotation": np.random.random(), "grasper": 0}
+
+    def handle_deadlock(self):
+        self.step_deadlock_count += 1
+        print("DEADLOCK")
+        return {"forward": 0.0, "lateral": 0.0, "rotation": 0.0, "grasper": 0}
 
     def compute_departure_score(self):
         """
@@ -267,43 +284,46 @@ class MyDroneFrontex(DroneAbstract):
     def handle_searching_wall(self):
         return {"forward": 0.5, "lateral": 0.0, "rotation": 0.0, "grasper": 0}
 
-    def handle_following_wall(self, epsilon_wall_angle, min_dist,rescuing=0):
+    def handle_following_wall(self, epsilon_wall_angle, min_dist):
+        self.reset_exploration_path_params()
         epsilon_wall_angle = normalize_angle(epsilon_wall_angle)
         epsilon_wall_distance = min_dist - WallFollowingParams.dist_to_stay
 
-        if rescuing==1 : 
-            backwards = -1
-        else : 
-            backwards = 1
-        command = {"forward": backwards*WallFollowingParams.speed_following_wall, "lateral": 0.0, "rotation": 0.0, "grasper": rescuing}
+        command = {"forward": WallFollowingParams.speed_following_wall, "lateral": 0.0, "rotation": 0.0, "grasper": 0}
         command = self.pid_controller(command, epsilon_wall_angle, PIDParams.Kp_angle, PIDParams.Kd_angle, "rotation")
         command = self.pid_controller(command, epsilon_wall_distance, PIDParams.Kp_distance, PIDParams.Kd_distance, "lateral")
 
         return command
 
     def handle_grasping_wounded(self, score_wounded, epsilon_wounded):
+        self.reset_exploration_path_params()
         epsilon_wounded = normalize_angle(epsilon_wounded)
         command = {"forward": GraspingParams.grasping_speed, "lateral": 0.0, "rotation": 0.0, "grasper": 1 if score_wounded<GraspingParams.grasping_dist else 0}
         return self.pid_controller(command, epsilon_wounded, PIDParams.Kp_angle, PIDParams.Kd_angle,"rotation")
 
-    def handle_searching_rescue_center(self,epsilon_wall_angle,min_dist):
-        if not self.estimated_pose.gps and len(self.path)==0:   
-            self.no_previous_gps = True
-            return self.handle_following_wall(epsilon_wall_angle,min_dist,1)
-        else : 
-            if self.previous_state is not self.State.SEARCHING_RESCUE_CENTER or self.no_previous_gps :
-                self.plan_path_to_rescue_center()
-            
-            self.no_previous_gps = False
-            command = self.follow_path(self.path, found_and_near_wounded=True)
-            return command
+    def handle_searching_rescue_center(self):
+        if self.previous_state is not self.State.SEARCHING_RESCUE_CENTER:
+            self.plan_path_to_rescue_center()
+
+        command = self.follow_path(self.path, found_and_near_wounded=True)
+        return command
 
     def plan_path_to_rescue_center(self):
         start_cell = self.grid._conv_world_to_grid(*self.estimated_pose.position)
         target_cell = self.grid.initial_cell
         max_inflation = PathParams.max_inflation_grasping if bool(self.base.grasper.grasped_entities) else PathParams.max_inflation_obstacle
-        self.path = self.grid.compute_safest_path(start_cell, target_cell, max_inflation)
-        self.indice_current_waypoint = 0
+        if bool(self.estimated_pose.gps):
+            self.path = self.grid.compute_safest_path(start_cell, target_cell, max_inflation)
+            self.indice_current_waypoint = 0
+            self.history_path_searching.pop()
+            self.history_path_searching.append(True)
+        else:
+            self.path = None
+
+    def handle_grasping_following_wall(self, epsilon_wall_angle, min_dist):
+        command = self.handle_following_wall(epsilon_wall_angle, min_dist)
+        command["grasper"] = 1
+        return command
 
     def handle_going_rescue_center(self, epsilon_rescue_center, is_very_near):
         epsilon_rescue_center = normalize_angle(epsilon_rescue_center)
@@ -318,8 +338,8 @@ class MyDroneFrontex(DroneAbstract):
             else:
                 self.counter_static = 0
 
-            if self.counter_static > 20 and self.state_lock_counter==0:
-                self.state_lock_counter = 10
+            if self.counter_static > 40 and self.state_lock_counter==0:
+                self.state_lock_counter = 20
             else:
                 command["forward"] = -0.3
                 command["grasper"] = 0
@@ -395,7 +415,6 @@ class MyDroneFrontex(DroneAbstract):
                     avg_abs_value = np.mean(neighborhood)
                     # Si la valeur moyenne est sous le seuil, considérer comme non exploré
                     if avg_abs_value < threshold:
-                        #print("Unexplored point found")
                         unexplored_point = (random_x, random_y)
                         self.unexplored_point = unexplored_point
                         break
@@ -446,8 +465,9 @@ class MyDroneFrontex(DroneAbstract):
             target_cell = self.next_frontier_centroid
             max_inflation = PathParams.max_inflation_obstacle
             self.path = self.grid.compute_safest_path(start_cell, target_cell, max_inflation)
+            self.history_path_searching.pop()
+            self.history_path_searching.append(True)
             if self.path is None:
-                print("Assigned frontier unreachable, deleting artifacts.")
                 self.did_not_find_path = True
             else:
                 self.indice_current_waypoint = 0
@@ -559,7 +579,7 @@ class MyDroneFrontex(DroneAbstract):
             deriv_epsilon = -np.sin(self.odometer_values()[1])*self.odometer_values()[0] # vitesse latérale
         elif mode == "forward" : 
             deriv_epsilon = epsilon - self.prev_diff_position
-            self.prev_diff_position = epsilon 
+            self.prev_diff_position = epsilon
             
         else : 
             raise ValueError("Mode not found")
@@ -629,6 +649,8 @@ class MyDroneFrontex(DroneAbstract):
         return command_path
 
     def must_return_area(self):
+        if not(bool(self.estimated_pose.gps)):
+            return False
         return self.history_health[-1] < HealthParams.THRESHOLD_HEALTH or self.elapsed_timestep / self._misc_data.max_timestep_limit > HealthParams.THRESHOLD_TIMESTEP
 
     def state_update(self, found_wall, found_wounded, found_rescue_center, is_near_rescuing_drone, must_return):
@@ -642,7 +664,9 @@ class MyDroneFrontex(DroneAbstract):
             "must_return": must_return,
             "is_and_must_inside_return": self.is_inside_return_area and must_return and (not bool(self.base.grasper.grasped_entities)),
             "no_longer_inside_return": not self.is_inside_return_area and must_return and (not bool(self.base.grasper.grasped_entities)),
-            "no_gps" : not self.estimated_pose.gps,
+            "try_searching_rescue_center" : self.timestep_count%200==0 and bool(self.estimated_pose.gps),
+            "gps": bool(self.estimated_pose.gps),
+            "no_gps" : not(bool(self.estimated_pose.gps)),
             "found_wall": found_wall,
             "lost_wall": not found_wall,
             "found_wounded": found_wounded,
@@ -653,10 +677,13 @@ class MyDroneFrontex(DroneAbstract):
             "lost_rescue_center": not self.base.grasper.grasped_entities and not must_return,
             "no_frontiers_left": len(self.grid.frontiers) == 0,
             "waiting_time_over": self.step_waiting_count >= WaitingStateParams.step_waiting,
+            "deadlock_time_over": self.step_deadlock_count >= WaitingStateParams.step_deadlock,
             "is_near_rescuing_drone": is_near_rescuing_drone,
-            "gps_and_frontiers_left" : len(self.grid.frontiers) !=0 and self.estimated_pose.gps,
             "health_decreasing" : np.sum(np.diff(np.array(self.history_health)) < 0)>1,
-            "did_not_find_path": self.did_not_find_path
+            "did_not_find_path": self.did_not_find_path,
+            "no_path_to_rescue_center": self.path is None or len(self.path) == 0,
+            "too_much_path_searching": sum(self.history_path_searching) >= 3,
+            "immobile_no_gps": np.mean(np.array(self.history_forward_epsilon)) < 0.5
         }
 
         STATE_TRANSITIONS = {
@@ -671,11 +698,16 @@ class MyDroneFrontex(DroneAbstract):
                 "is_and_must_inside_return": self.State.STOP,
                 "waiting_time_over": self.State.EXPLORING_FRONTIERS
             },
+            self.State.DEADLOCK: {
+                "deadlock_time_over": self.State.WAITING
+            },
             self.State.GRASPING_WOUNDED: {
                 "lost_wounded": self.State.WAITING,
                 "holding_wounded": self.State.SEARCHING_RESCUE_CENTER
             },
             self.State.SEARCHING_RESCUE_CENTER: {
+                "too_much_path_searching": self.State.DEADLOCK,
+                "no_path_to_rescue_center": self.State.GRASPING_FOLLOWING_WALL,
                 "must_return_grasping_available": self.State.GRASPING_WOUNDED,
                 "is_and_must_inside_return": self.State.STOP,
                 "lost_rescue_center": self.State.WAITING,
@@ -686,13 +718,18 @@ class MyDroneFrontex(DroneAbstract):
                 "no_longer_inside_return": self.State.SEARCHING_RESCUE_CENTER,
                 "lost_rescue_center": self.State.WAITING
             },
+            self.State.GRASPING_FOLLOWING_WALL:{
+                "try_searching_rescue_center": self.State.SEARCHING_RESCUE_CENTER,
+                "lost_wounded": self.State.FOLLOWING_WALL,
+                "immobile_no_gps": self.State.WAITING
+            },
             self.State.EXPLORING_FRONTIERS: {
                 "found_wounded": self.State.GRASPING_WOUNDED,
                 "is_and_must_inside_return": self.State.STOP,
                 "must_return": self.State.SEARCHING_RESCUE_CENTER,
                 "health_decreasing": self.State.WAITING,
                 "no_gps" : self.State.FOLLOWING_WALL,
-                "did_not_find_path": self.State.WAITING,
+                "did_not_find_path": self.State.FOLLOWING_WALL,
                 "no_frontiers_left": self.State.SEARCHING_RESCUE_CENTER,
                 "is_near_rescuing_drone": self.State.WAITING
             },
@@ -709,9 +746,9 @@ class MyDroneFrontex(DroneAbstract):
                 "must_return": self.State.SEARCHING_RESCUE_CENTER,
                 "found_wounded": self.State.GRASPING_WOUNDED,
                 "health_decreasing": self.State.WAITING,
+                "gps": self.State.WAITING,
                 "lost_wall": self.State.SEARCHING_WALL,
-                "is_near_rescuing_drone": self.State.WAITING,
-                "gps_and_frontiers_left" : self.State.EXPLORING_FRONTIERS
+                "is_near_rescuing_drone": self.State.WAITING
             }
         }
 
@@ -720,9 +757,11 @@ class MyDroneFrontex(DroneAbstract):
                 self.state = next_state
                 break
 
-        if self.state != self.previous_state and self.state == self.State.WAITING:
-            self.step_waiting_count = 0
-
+        if self.state != self.previous_state:
+                if self.state == self.State.WAITING:
+                    self.step_waiting_count = 0
+                if self.state == self.State.DEADLOCK:
+                    self.step_deadlock_count = 0
     
     def mapping(self, display = False):
         
