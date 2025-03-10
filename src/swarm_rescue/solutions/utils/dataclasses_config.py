@@ -15,8 +15,13 @@ class WaitingStateParams:
     step_waiting: int = 20
 
 @dataclass
+class WaitingDepartureStateParams:
+    size_drone_group: int = 3
+    interval_departure: int = 150
+
+@dataclass
 class GraspingParams:
-    grasping_speed: float = 0.4
+    grasping_speed: float = 0.5
     grasping_dist: int = 30
     hampering_dist: int = 5
 

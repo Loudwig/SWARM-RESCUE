@@ -7,6 +7,7 @@ class DroneMessage:
         PASS = "PASS"
         LOCK_WOUNDED = "LOCK_WOUNDED"
         FRONTIER_PRIO = "FRONTIER_PRIO"
+        DEPARTURE = "DEPARTURE"
 
     def __init__(self, subject: str, arg, drone_id=None):
         if subject not in vars(DroneMessage.Subject).values():

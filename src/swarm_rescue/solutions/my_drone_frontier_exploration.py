@@ -37,6 +37,7 @@ class MyDroneFrontex(DroneAbstract):
         All the states of the drone as a state machine
         """
         WAITING = auto()    # Assigns 1
+        WAITING_DEPARTURE = auto()
 
         SEARCHING_WALL = auto()     # Assigns 2 etc ... This allows to easily add new states
         FOLLOWING_WALL = auto()
@@ -76,14 +77,18 @@ class MyDroneFrontex(DroneAbstract):
         self.prev_diff_position = 0
 
         # STATE INITIALISATION
-        self.state  = self.State.WAITING
-        self.previous_state = self.State.WAITING # Utile pour vérfier que c'est la première fois que l'on rentre dans un état
+        self.state  = self.State.WAITING_DEPARTURE
+        self.previous_state = self.State.WAITING_DEPARTURE # Utile pour vérfier que c'est la première fois que l'on rentre dans un état
         
         # PARAMS FOR DIFFERENT STATES 
 
             # WAITING STATE
         self.waiting_params = WaitingStateParams()
         self.step_waiting_count = 0
+
+            # WAITING DEPARTURE STATE
+        self.all_drones_departure_score = []
+        self.departure = False
 
             # GRASPING 
         self.grasping_params = GraspingParams()
@@ -119,7 +124,7 @@ class MyDroneFrontex(DroneAbstract):
         self.wounded_locked = []
         self.other_drones_pos = []
 
-        self.history_health = deque(maxlen=10)
+        self.history_health = deque(maxlen=50)
 
         self.counter_static = 0
         self.last_position = None
@@ -153,6 +158,13 @@ class MyDroneFrontex(DroneAbstract):
                 arg=(self.identifier, self.estimated_pose.position.tolist())
             )
             message.append(broadcast_msg)
+
+        if self.state == self.State.WAITING_DEPARTURE:
+            broadcast_msg = DroneMessage(
+                subject=DroneMessage.Subject.DEPARTURE,
+                arg=(self.identifier, self.compute_departure_score())
+            )
+            message.append(broadcast_msg)
         loc_msg = DroneMessage(
             subject=DroneMessage.Subject.FRONTIER_PRIO,
             arg=(self.identifier, self.estimated_pose.position.tolist()))
@@ -162,6 +174,7 @@ class MyDroneFrontex(DroneAbstract):
     def communication_management(self):
         self.wounded_locked = []
         self.other_drones_pos = []
+        self.all_drones_departure_score = []
         if self.communicator:
             received_messages = self.communicator.received_messages
             for msg in received_messages:
@@ -176,6 +189,9 @@ class MyDroneFrontex(DroneAbstract):
                     if drone_msg.subject == DroneMessage.Subject.FRONTIER_PRIO:
                         drone_id, position = drone_msg.arg
                         self.other_drones_pos.append((drone_id,position))
+                    if drone_msg.subject == DroneMessage.Subject.DEPARTURE:
+                        drone_id, score = drone_msg.arg
+                        self.all_drones_departure_score.append(score)
 
     def compute_confidence(self, gps):
         if gps is None: # Si en zone non gps
@@ -191,9 +207,11 @@ class MyDroneFrontex(DroneAbstract):
 
             self.timestep_count += 1
             self.history_health.append(self.drone_health)
+            print(self.all_drones_departure_score)
 
-            if np.sum(np.diff(self.history_health) < 0)>2:
-                print(self.identifier,np.sum(np.diff(self.history_health) < 0))
+            #health_array = np.array(self.history_health)
+            #if np.sum(np.diff(health_array) < 0) > 1:
+            #    print(self.identifier, np.sum(np.diff(health_array) < 0))
             
             #if self.state not in [self.State.SEARCHING_RESCUE_CENTER,self.State.GOING_RESCUE_CENTER]:
             self.mapping(display=self.mapping_params.display_map)
@@ -217,13 +235,14 @@ class MyDroneFrontex(DroneAbstract):
             # Execute Corresponding Command
             state_handlers = {
                 self.State.WAITING: self.handle_waiting,
+                self.State.WAITING_DEPARTURE: self.handle_waiting_departure,
                 self.State.SEARCHING_WALL: self.handle_searching_wall,
                 self.State.FOLLOWING_WALL: lambda: self.handle_following_wall(epsilon_wall_angle, min_dist),
                 self.State.GRASPING_WOUNDED: lambda: self.handle_grasping_wounded(min_dist_wnd, epsilon_wounded),
                 self.State.SEARCHING_RESCUE_CENTER: lambda : self.handle_searching_rescue_center(epsilon_wall_angle,min_dist),
                 self.State.GOING_RESCUE_CENTER: lambda: self.handle_going_rescue_center(epsilon_rescue_center, is_very_near_rescue_center),
                 self.State.EXPLORING_FRONTIERS: lambda: self.handle_exploring_frontiers(is_near_rescue_center),
-                self.State.STOP: lambda: {"forward": 0.0, "lateral": 0.0, "rotation": 0.0, "grasper": 0}
+                self.State.STOP: lambda: {"forward": 0.0, "lateral": 0.0, "rotation": 0.0, "grasper": 0},
             }
 
             #print(self.identifier, self.state)
@@ -245,6 +264,29 @@ class MyDroneFrontex(DroneAbstract):
         self.reset_exploration_path_params()
         self.step_waiting_count += 1
         return {"forward": 0.0, "lateral": 0.0, "rotation": np.random.random(), "grasper": 0}
+
+    def compute_departure_score(self):
+        """
+        Drones that have the highest departure scores can start exploring first.
+        Drones with highest variance (see below) are those who are on the outside of the group.
+        """
+        other_drone_pos = self.other_drones_pos
+        if len(other_drone_pos) == 0:
+            return 0
+
+        other_drone_pos = np.array([np.array(pos) for _, pos in self.other_drones_pos])
+        return int(np.sum((other_drone_pos - self.estimated_pose.position) ** 2)) # Variance
+
+    def handle_waiting_departure(self):
+        self.all_drones_departure_score.append(self.compute_departure_score())
+        if self.timestep_count % WaitingDepartureStateParams.interval_departure == 10:
+            size_drone_group = WaitingDepartureStateParams.size_drone_group
+            #print(self.all_drones_departure_score)
+            #print(self.compute_departure_score())
+            if self.compute_departure_score() in sorted(self.all_drones_departure_score, reverse=True)[
+                                                 :size_drone_group]:
+                self.departure = True
+        return {"forward": 0.0, "lateral": 0.0, "rotation": 0.0, "grasper": 0}
 
     def handle_searching_wall(self):
         return {"forward": 0.5, "lateral": 0.0, "rotation": 0.0, "grasper": 0}
@@ -281,18 +323,18 @@ class MyDroneFrontex(DroneAbstract):
             
             self.no_previous_gps = False
             command = self.follow_path(self.path, found_and_near_wounded=True)
-            return command
-            #movement = math.dist(self.grid._conv_world_to_grid(*self.estimated_pose.position), self.last_position)
-            #if movement < 0.05:
-            #    print("on bouge pas gros")
-            #    self.counter_static += 1
-            #else:
-            #    self.counter_static = 0
-            #if self.counter_static > 200:
-            #    print("Grasper drone too static, exiting")
-            #    command["grasper"] = 0
-            #    self.counter_static -= 20
             #return command
+            movement = math.dist(self.grid._conv_world_to_grid(*self.estimated_pose.position), self.last_position)
+            if movement < 0.005:
+                print("on bouge pas gros")
+                self.counter_static += 1
+            else:
+                self.counter_static = 0
+            if self.counter_static > 300:
+                print("Grasper drone too static, exiting")
+                command["grasper"] = 0
+                self.counter_static -= 100
+            return command
 
     def plan_path_to_rescue_center(self):
         start_cell = self.grid._conv_world_to_grid(*self.estimated_pose.position)
@@ -687,6 +729,7 @@ class MyDroneFrontex(DroneAbstract):
         self.previous_state = self.state
         
         conditions = {
+            "departure": self.departure,
             "must_return": must_return,
             "is_and_must_inside_return": self.is_inside_return_area and must_return and (not bool(self.base.grasper.grasped_entities)),
             "no_longer_inside_return": not self.is_inside_return_area and must_return and (not bool(self.base.grasper.grasped_entities)),
@@ -703,10 +746,13 @@ class MyDroneFrontex(DroneAbstract):
             "waiting_time_over": self.step_waiting_count >= self.waiting_params.step_waiting,
             "is_near_rescuing_drone": is_near_rescuing_drone,
             "gps_and_frontiers_left" : len(self.grid.frontiers) !=0 and self.estimated_pose.gps,
-            "health_decreasing" : np.sum(np.diff(self.history_health) < 0)>4
+            "health_decreasing" : np.sum(np.diff(np.array(self.history_health)) < 0)>1
         }
 
         STATE_TRANSITIONS = {
+            self.State.WAITING_DEPARTURE:{
+                "departure": self.State.WAITING
+            },
             self.State.STOP: {
                 "no_longer_inside_return": self.State.SEARCHING_RESCUE_CENTER
             },
