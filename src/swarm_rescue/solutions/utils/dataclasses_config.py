@@ -18,7 +18,7 @@ class WaitingStateParams:
 @dataclass
 class WaitingDepartureStateParams:
     size_drone_group: int = 1
-    interval_departure: int = 0.6
+    departure_time_rate: float = 0.6
 
 @dataclass
 class GraspingParams:
@@ -101,4 +101,4 @@ class HealthParams:
 
 @dataclass
 class CommunicationParams:
-    TIME_INTERVAL : int = 5
+    GRID_SHARE_TIME_INTERVAL : int = 5
