@@ -19,6 +19,7 @@ class WaitingStateParams:
 class WaitingDepartureStateParams:
     size_drone_group: int = 1
     departure_time_rate: float = 0.6
+    departure_time_offset: int = 10
 
 @dataclass
 class GraspingParams:

@@ -96,6 +96,16 @@ class MyDroneFrontex(DroneAbstract):
         self.distance_nearest_obstacle = 0.0
         self.epsilon_angle_wall = 0.0
 
+            # GRASPING WOUNDED
+        self.found_wounded = False
+        self.best_angle_wounded = 0
+        self.best_angle_rescue_center = 0
+        self.distance_nearest_wounded = 0.0
+        self.found_rescue_center = False
+        self.is_near_rescue_center = False
+        self.is_very_near_rescue_center = False
+        self.angles_list = []
+
         # PATH FOLLOWING
         self.index_current_waypoint = 0
         self.inital_point_path = np.array([0.0,0.0])
@@ -126,6 +136,15 @@ class MyDroneFrontex(DroneAbstract):
         self.wounded_locked = []
         self.other_drones_pos = []
         self.all_drones_departure_score = []
+    
+    def reset_semantic_infos(self):
+        self.best_angle_wounded = 0.0
+        self.best_angle_rescue_center = 0
+        self.found_wounded = False
+        self.found_rescue_center = False
+        self.is_near_rescue_center = False
+        self.is_very_near_rescue_center = False
+        self.angles_list = []
     
     def is_killed(self):
         return self.lidar().get_sensor_values() is None or self._drone_health<=0
@@ -199,22 +218,21 @@ class MyDroneFrontex(DroneAbstract):
 
             self.mapping(display=MappingParams.display_map)
 
+            # Retrieve other drones infos
             self.reset_received_infos()
             self.communication_management()
 
             # Retrieve Sensor Data
             self.process_lidar_sensor()
-            self.process_semantic_sensor() = found_wounded, found_rescue_center, score_wounded, epsilon_wounded, epsilon_rescue_center, is_near_rescue_center,is_very_near_rescue_center, min_dist_wnd
+            self.process_semantic_sensor()
 
             is_near_rescuing_drone = self.check_near_rescuing_drone(threshold=GraspingParams.hampering_dist)
             if is_near_rescuing_drone:
                 pass
 
-            must_return = self.must_return_area()
-
-            # TRANSITIONS OF THE STATE
+            # Transitions of the state
             if self.state_lock_counter <= 0:
-                self.state_update(found_wall, found_rescue_center, is_near_rescuing_drone, must_return)
+                self.state_update()
 
             # Execute Corresponding Command
             state_handlers = {
@@ -222,13 +240,13 @@ class MyDroneFrontex(DroneAbstract):
                 self.State.DEADLOCK: self.handle_deadlock,
                 self.State.WAITING_DEPARTURE: self.handle_waiting_departure,
                 self.State.SEARCHING_WALL: self.handle_searching_wall,
-                self.State.FOLLOWING_WALL: lambda: self.handle_following_wall(),
-                self.State.FOLLOWING_WALL: lambda: self.handle_following_wall(),
-                self.State.GRASPING_WOUNDED: lambda: self.handle_grasping_wounded(min_dist_wnd, epsilon_wounded),
+                self.State.FOLLOWING_WALL: self.handle_following_wall,
+                self.State.FOLLOWING_WALL: self.handle_following_wall,
+                self.State.GRASPING_WOUNDED: self.handle_grasping_wounded,
                 self.State.SEARCHING_RESCUE_CENTER: self.handle_searching_rescue_center,
-                self.State.GOING_RESCUE_CENTER: lambda: self.handle_going_rescue_center(epsilon_rescue_center, is_very_near_rescue_center),
-                self.State.GRASPING_FOLLOWING_WALL: lambda: self.handle_grasping_following_wall(),
-                self.State.EXPLORING_FRONTIERS: lambda: self.handle_exploring_frontiers(is_near_rescue_center),
+                self.State.GOING_RESCUE_CENTER: self.handle_going_rescue_center,
+                self.State.GRASPING_FOLLOWING_WALL: self.handle_grasping_following_wall,
+                self.State.EXPLORING_FRONTIERS: self.handle_exploring_frontiers,
                 self.State.STOP: lambda: {"forward": 0.0, "lateral": 0.0, "rotation": 0.0, "grasper": 0},
             }
 
@@ -249,36 +267,27 @@ class MyDroneFrontex(DroneAbstract):
         return {"forward": 0.0, "lateral": 0.0, "rotation": np.random.random(), "grasper": 0}
 
     def handle_deadlock(self):
+        self.reset_exploration_path_infos()
         self.step_deadlock_count += 1
-        print("DEADLOCK")
         return {"forward": 0.0, "lateral": 0.0, "rotation": 0.0, "grasper": 0}
 
     def compute_departure_score(self):
         """
         Drones that have the highest departure scores can start exploring first.
         """
-        other_drone_pos = self.other_drones_pos
-        if len(other_drone_pos) == 0:
-            return 0
-
         score = np.sum(self.lidar().get_sensor_values())
         return int(score)
 
     def barycenter(self, all_drone_positions):
-        positions = [np.array(pos) for _, pos in all_drone_positions]
-        positions_array = np.array(positions)
-        return self.grid._conv_world_to_grid(*np.mean(positions_array, axis=0))
+        positions = np.array([pos for _, pos in all_drone_positions])
+        return np.mean(positions, axis=0)
 
     def handle_waiting_departure(self):
         self.all_drones_departure_score.append(self.compute_departure_score())
-        if self.elapsed_timestep % self.interval_departure == 10:
+        if self.elapsed_timestep % self.interval_departure == WaitingDepartureStateParams.departure_time_offset:
             size_drone_group = WaitingDepartureStateParams.size_drone_group
             if self.compute_departure_score() in sorted(self.all_drones_departure_score, reverse=True)[:size_drone_group]:
                 self.departure = True
-
-        if self.initial_group_barycenter is None:
-            if len(self.other_drones_pos) != 0:
-                self.initial_group_barycenter = self.barycenter(self.other_drones_pos + [(self.identifier,self.estimated_pose.position)])
 
         return {"forward": 0.0, "lateral": 0.0, "rotation": 0.0, "grasper": 0}
 
@@ -309,11 +318,12 @@ class MyDroneFrontex(DroneAbstract):
         return command
 
     def plan_path_to_rescue_center(self):
-        start_cell = self.grid._conv_world_to_grid(*self.estimated_pose.position)
-        target_cell = self.grid.initial_cell
-        max_inflation = PathParams.max_inflation_grasping if bool(self.base.grasper.grasped_entities) else PathParams.max_inflation_obstacle
+        start_pos = self.estimated_pose.position
+        target_pos = self.initial_pos
+        max_inflation = PathParams.max_inflation_grasping if bool(self.base.grasper.grasped_entities) \
+                                                            else PathParams.max_inflation_obstacle
         if bool(self.estimated_pose.gps):
-            self.path = self.grid.compute_safest_path(start_cell, target_cell, max_inflation)
+            self.path = self.grid.compute_safest_path(start_pos, target_pos, max_inflation)
             self.index_current_waypoint = 0
             self.history_path_searching.pop()
             self.history_path_searching.append(True)
@@ -477,26 +487,19 @@ class MyDroneFrontex(DroneAbstract):
 
     def process_semantic_sensor(self):
         semantic_values = self.semantic_values()
-        
-        best_angle_wounded = 0
-        best_angle_rescue_center = 0
-        mindist = 1000
-        found_wounded = False
-        found_rescue_center = False
-        is_near_rescue_center = False
-        is_very_near_rescue_center = False
-        angles_list = []
+
+        self.reset_semantic_infos()
 
         scores = []
         for data in semantic_values:
             if (data.entity_type == DroneSemanticSensor.TypeEntity.RESCUE_CENTER):
                 found_rescue_center = True
-                angles_list.append(data.angle)
+                self.angles_list.append(data.angle)
                 if data.distance < 45.0:
                     is_very_near_rescue_center = True
                 if data.distance < 80.0:
                     is_near_rescue_center = True
-                best_angle_rescue_center = circular_mean(np.array(angles_list))
+                best_angle_rescue_center = circular_mean(np.array(self.angles_list))
             
             # If the wounded person detected is held by nobody
             elif (data.entity_type ==
@@ -524,9 +527,9 @@ class MyDroneFrontex(DroneAbstract):
             if score[0] < best_score:
                 best_score = score[0]
                 best_angle_wounded = score[1]
-                mindist = score[2]
+                self.distance_nearest_wounded = score[2]
 
-        return found_wounded,found_rescue_center,best_score,best_angle_wounded,best_angle_rescue_center,is_near_rescue_center,is_very_near_rescue_center,mindist
+        return found_wounded,found_rescue_center,best_score,best_angle_wounded,best_angle_rescue_center,is_near_rescue_center,is_very_near_rescue_center
     
     def process_lidar_sensor(self):
         lidar_values = self.lidar().get_sensor_values()
@@ -740,8 +743,7 @@ class MyDroneFrontex(DroneAbstract):
     def mapping(self, display = False):
         
         if self.elapsed_timestep == 1: # first iterations
-            start_x, start_y = self.measured_gps_position() # never none ?
-            self.grid.set_initial_cell(start_x, start_y)
+            self.initial_pos = self.measured_gps_position()
 
         self.estimated_pose = Pose(np.asarray(self.measured_gps_position()),
                                    self.measured_compass_angle(),self.odometer_values(),self.previous_position,self.previous_orientation,self.size_area)

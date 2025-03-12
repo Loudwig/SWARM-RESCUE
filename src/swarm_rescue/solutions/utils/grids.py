@@ -13,15 +13,11 @@ from sklearn.cluster import DBSCAN
 
 class OccupancyGrid(Grid):
     """Self updating occupancy grid"""
-
     OBSTACLE = GridParams.OBSTACLE
     FREE = GridParams.FREE
     UNDISCOVERED = GridParams.UNDISCOVERED
 
     class Frontier:
-
-        MIN_FRONTIER_SIZE = GridParams.MIN_FRONTIER_SIZE
-
         def __init__(self, cells):
             """
             Initialize a frontier with a list of grid cells.
@@ -69,9 +65,6 @@ class OccupancyGrid(Grid):
         self.y_max_grid: int = int(self.size_area_world[1] / self.resolution
                                    + 0.5)
 
-        self.initial_cell = None
-        self.initial_cell_value = None
-
         WORLD_BORDERS_VALUE = GridParams.WORLD_BORDERS_VALUE
         self.grid = np.zeros((self.x_max_grid, self.y_max_grid))
         # Set the value of all border cells to WORLD_BORDERS_VALUE so they are considered as obstacles
@@ -82,40 +75,37 @@ class OccupancyGrid(Grid):
 
         self.frontier_connectivity_structure = np.ones((3, 3), dtype=int)  # Connects points that are adjacent (even diagonally)
         self.frontiers = []
-
-    def set_initial_cell(self, world_x, world_y):
-        """
-        Store the cell that corresponds to the initial drone position 
-        This should be called once the drone initial position is known.
-        """
-        cell_x, cell_y = self._conv_world_to_grid(world_x, world_y)
-        
-        if 0 <= cell_x < self.x_max_grid and 0 <= cell_y < self.y_max_grid:
-            self.initial_cell = (cell_x, cell_y)
     
     def to_ternary_map(self):
+        """
+        Convert the probabilistic occupancy grid into a ternary grid.
+        Cells with value >= OBSTACLE_THRESHOLD are considered obstacles.
+        Cells with value <= FREE_THRESHOLD are considered free.
+        Cells with value = 0 are considered undiscovered
+        """
         OBSTACLE_THRESHOLD = GridParams.OBSTACLE_THRESHOLD
         FREE_THRESHOLD = GridParams.FREE_THRESHOLD
 
         ternary_map = np.zeros_like(self.grid, dtype=int)
-        ternary_map[self.grid > OBSTACLE_THRESHOLD] = self.OBSTACLE
+        ternary_map[self.grid >= OBSTACLE_THRESHOLD] = self.OBSTACLE
         ternary_map[self.grid <= FREE_THRESHOLD] = self.FREE
-        ternary_map[abs(self.grid) <=  OBSTACLE_THRESHOLD] = self.UNDISCOVERED
+        ternary_map[ not(self.grid >= OBSTACLE_THRESHOLD or self.grid <= FREE_THRESHOLD) ] = self.UNDISCOVERED
         return ternary_map
 
     def to_binary_map(self):
         """
-        Convert the probabilistic occupancy grid into a ternary grid.
-        OBSTACLE = 1
-        FREE = 0
-        UNDISCOVERED = -2
+        Convert the probabilistic occupancy grid into a binary grid.
         Cells with value > OBSTACLE_THRESHOLD are considered obstacles.
         Cells with value < FREE_THRESHOLD are considered free.
-        Cells with value = 0 are considered undiscovered
         """
+        OBSTACLE_THRESHOLD = GridParams.OBSTACLE_THRESHOLD
+        FREE_THRESHOLD = GridParams.FREE_THRESHOLD
+
         binary_map = np.zeros_like(self.grid, dtype=int)
-        binary_map[self.grid > 2] = self.OBSTACLE
-        binary_map[abs(self.grid) <= 2] = self.UNDISCOVERED
+        binary_map[self.grid >= OBSTACLE_THRESHOLD] = self.OBSTACLE
+        binary_map[self.grid <= FREE_THRESHOLD] = self.FREE
+        # Binary map : undiscovered are considered obstacles
+        binary_map[ not(self.grid >= OBSTACLE_THRESHOLD or self.grid <= FREE_THRESHOLD) ] = self.OBSTACLE
         return binary_map
     
     def update(self, pose: Pose):
@@ -224,7 +214,7 @@ class OccupancyGrid(Grid):
 
         # Extract points from each connected component and filter by minimum frontier size
         frontiers = [np.argwhere(labeled_array == i) for i in range(1, num_features + 1)]
-        self.frontiers = [self.Frontier(cells) for cells in frontiers if len(cells) >= self.Frontier.MIN_FRONTIER_SIZE]
+        self.frontiers = [self.Frontier(cells) for cells in frontiers if len(cells) >= GridParams.MIN_FRONTIER_SIZE]
 
     def cluster_frontiers_dbscan(self, eps=2, min_samples=3):
         """
