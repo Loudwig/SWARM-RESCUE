@@ -51,16 +51,20 @@ class MyDronePID(DroneAbstract):
         # PID PARAMS
         self.wall_following_params = WallFollowingParams()
         self.pid_params = PIDParams()
-        self.past_ten_errors_angle = [0] * 10
-        self.past_ten_errors_lateral = [0] * 10
+        self.history_epsilon_angle = deque([0.0] * 10, maxlen=10)
+        self.history_epsilon_lateral = deque([0.0] * 10, maxlen=10)
+        self.history_epsilon_forward = deque([0.0] * 10, maxlen=10)
         
         # PATH FOLLOWING
         self.path_params = PathParams()
-        self.indice_current_waypoint = 0
+        self.index_current_waypoint = 0
+        self.previous_waypoint_position = np.array([0.0,0.0])
+        self.next_waypoint_position = np.array([0.0,0.0])
         self.inital_point_path = (0,0)
         self.finished_path = False
 ###########################PATH CHOICE##########################
         self.path = path_creator.path2.path
+        self.path = [np.array(point) for point in self.path]
 ###########################PATH CHOICE##########################
         self.path_grid = []
 
@@ -89,7 +93,7 @@ class MyDronePID(DroneAbstract):
 
         self.log_pid_values()
 
-        return self.follow_path(self.path)
+        return self.follow_path()
     
     def log_pid_values(self):
         """Log PID error values to a CSV file at each timestep"""
@@ -131,31 +135,36 @@ class MyDronePID(DroneAbstract):
 
     # Takes the current relative error and with a PID controller, returns the command
     # mode : "rotation" or "lateral" for now could be speed or other if implemented
-    def pid_controller(self,command,epsilon,Kp,Kd,Ki,past_ten_errors,mode,command_slow = 0.8):
+    def pid_controller(self,command,epsilon,Kp,Kd,Ki,history_epsilon,mode,command_slow = 0.8):
         
-        past_ten_errors.pop(0)
-        past_ten_errors.append(epsilon)
         if mode == "rotation":
             epsilon = normalize_angle(epsilon)
             self.epsilon_angle = epsilon
             deriv_epsilon = normalize_angle(self.odometer_values()[2])
+            self.history_epsilon_angle.append(self.epsilon_angle)
         elif mode == "lateral":
             self.epsilon_lateral = epsilon
             deriv_epsilon = -np.sin(self.odometer_values()[1])*self.odometer_values()[0] # vitesse latérale
+            self.history_epsilon_lateral.append(self.epsilon_lateral)
         elif mode == "forward" :
             self.epsilon_forward = epsilon
-            deriv_epsilon = self.odometer_values()[0]*np.cos(self.odometer_values()[1]) # vitesse longitudinale
+            deriv_epsilon = self.epsilon_forward - self.history_epsilon_forward[-1]
+            self.history_epsilon_forward.append(self.epsilon_forward)
         else : 
             raise ValueError("Mode not found")
         
         correction_proportionnelle = Kp * epsilon
         correction_derivee = Kd * deriv_epsilon
         correction_integrale = 0
-        #correction_integrale = Ki * sum(past_ten_errors)
         correction = correction_proportionnelle + correction_derivee + correction_integrale
         command[mode] = correction
         command[mode] = min( max(-1,correction) , 1 )
 
+        print(self.epsilon_angle)
+
+        if abs(self.epsilon_angle) >= 0.2:
+            command["forward"] = 0.0
+            command["lateral"] = 0.0
 
         if mode == "rotation" : 
             if correction > command_slow :
@@ -169,45 +178,43 @@ class MyDronePID(DroneAbstract):
             return True
         return False
 
-    def follow_path(self,path):
-        if path is not None:
-            if self.is_near_waypoint(path[self.indice_current_waypoint]):
-                self.indice_current_waypoint += 1
-                if self.indice_current_waypoint >= len(path):
-                    self.finished_path = True
-                    self.indice_current_waypoint = 0
-                    self.path = []
-                    self.path_grid = []
-                    return
-        
-        return self.go_to_waypoint(path[self.indice_current_waypoint][0],path[self.indice_current_waypoint][1])
+    def is_stabilized(self):
+        return np.mean([abs(error) for error in self.history_epsilon_forward]) <= 30.0
 
-    def go_to_waypoint(self,x,y):
+    def follow_path(self):
+        if self.path is not None:
+            if self.is_near_waypoint(self.next_waypoint_position):
+                if self.is_stabilized():
+                    self.index_current_waypoint += 1
+                    self.previous_waypoint_position = self.next_waypoint_position
+                    self.next_waypoint_position = self.path[self.index_current_waypoint]
+                    if self.index_current_waypoint >= len(self.path):
+                        self.finished_path = True
+                        self.index_current_waypoint = 0
+                        self.path = []
+                        self.path_grid = []
+                        return
+        
+        return self.go_to_next_waypoint()
+
+    def go_to_next_waypoint(self):
+        current_segment = self.next_waypoint_position - self.previous_waypoint_position
+        error_vector = self.next_waypoint_position - self.estimated_pose.position
         
         # ASSERVISSEMENT EN ANGLE
-        dx = x - self.estimated_pose.position[0]
-        dy = y - self.estimated_pose.position[1]
-        epsilon = math.atan2(dy,dx) - self.estimated_pose.orientation
-        epsilon = normalize_angle(epsilon)
-        command_path = self.pid_controller({"forward": 1,"lateral": 0.0,"rotation": 0.0,"grasper": 0},epsilon,self.pid_params.Kp_angle,self.pid_params.Kd_angle,self.pid_params.Ki_angle,self.past_ten_errors_angle,"rotation",0.5)
+        epsilon_angle = np.arctan2(current_segment[1], current_segment[0]) - self.estimated_pose.orientation
+        epsilon_angle = normalize_angle(epsilon_angle)
+        command_path = self.pid_controller({"forward": 1,"lateral": 0.0,"rotation": 0.0,"grasper": 0}, epsilon_angle, self.pid_params.Kp_angle, self.pid_params.Kd_angle, self.pid_params.Ki_angle, self.history_epsilon_angle, "rotation", 0.5)
 
         # ASSERVISSEMENT LATERAL
-        if self.indice_current_waypoint == 0:
-            x_previous_waypoint,y_previous_waypoint = self.inital_point_path
-        else : 
-            x_previous_waypoint,y_previous_waypoint = self.path[self.indice_current_waypoint-1][0],self.path[self.indice_current_waypoint-1][1]
+        epsilon_lateral = np.cross(current_segment, error_vector) / np.linalg.norm(current_segment)
+        command_path = self.pid_controller(command_path,epsilon_lateral,self.pid_params.Kp_lateral,self.pid_params.Kd_lateral,self.pid_params.Ki_lateral,self.history_epsilon_lateral,"lateral",0.5)
 
-        epsilon_lateral = compute_relative_distance_to_droite(x_previous_waypoint,y_previous_waypoint,x,y,self.estimated_pose.position[0],self.estimated_pose.position[1])
-        # epsilon distance needs to be signed (positive if the angle relative to the theoritical path is positive)
-        command_path = self.pid_controller(command_path,epsilon_lateral,self.pid_params.Kp_lateral,self.pid_params.Kd_lateral,self.pid_params.Ki_lateral,self.past_ten_errors_lateral,"lateral",0.5)
-
-        epsilon_forward = np.linalg.norm([dx,dy])
-        if epsilon_forward <= PathParams.threshold_waypoint_distance:
-            command_path = self.pid_controller(command_path,epsilon_forward,self.pid_params.Kp_forward,self.pid_params.Kd_forward,self.pid_params.Ki_forward,self.past_ten_errors_lateral,"forward",0.5)
+        # ASSERVISSEMENT LONGITUDINAL
+        epsilon_forward = np.dot(current_segment, error_vector) / np.linalg.norm(current_segment)
+        command_path = self.pid_controller(command_path,epsilon_forward,self.pid_params.Kp_forward,self.pid_params.Kd_forward,self.pid_params.Ki_forward,self.history_epsilon_lateral,"forward",0.5)
 
         return command_path
-
-    
 
     def draw_path(self, path):
         length = len(path)

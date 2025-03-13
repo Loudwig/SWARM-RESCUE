@@ -140,6 +140,7 @@ class MyDronePID_forward(DroneAbstract):
         command = {"forward": 1, "lateral": 0, "rotation": 0, "grasper": 0}
         epsilon = self.goal_abscissa - self.estimated_pose.position[0]
         command = self.pid_controller(command,epsilon,self.pid_params.Kp_forward,self.pid_params.Kd_forward,self.pid_params.Ki_forward,self.past_ten_errors_angle,"forward")
+        print(command["forward"])
         return command
 
     def draw_path(self, path):

@@ -31,7 +31,7 @@ class MyMapPID(MapAbstract):
 
     def __init__(self, zones_config: ZonesConfig = ()):
         super().__init__(zones_config)
-        self._max_timestep_limit = 150
+        self._max_timestep_limit = 400
         self._max_walltime_limit = 200  # In seconds
 
         # PARAMETERS MAP
