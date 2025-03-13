@@ -36,21 +36,17 @@ class WallFollowingParams:
 
 @dataclass
 class PIDParams:
-    Kp_angle: float = 4 / math.pi
-    Kp_angle_1: float = 9 / math.pi
+    Kp_angle: float = 9 / math.pi
     Kd_angle: float = Kp_angle / 10
-    Kd_angle_1: float = Kp_angle / 10
-    Ki_angle: float = 0
+    Ki_angle: float = 0.0
     
-    Kp_distance: float = 2 / abs(WallFollowingParams.dmax - WallFollowingParams.dist_to_stay)
-    Kp_distance_1 : float = 0.31111111111 # for following path
-    Ki_distance: float = 0
-    Ki_distance_1: float = 0
-    Kd_distance: float = 2 * Kp_distance
-    Kd_distance_1: float = 1.366666666666
+    Kp_lateral : float = 0.3111
+    Kd_lateral: float = 1.3667
+    Ki_lateral: float = 0.0
 
-    Kp_distance_2: float = 1.6
-    Kd_distance_2: float = 11.0
+    Kp_forward : float = 1.6
+    Kd_forward: float = 11.0
+    Ki_forward: float = 0
 
 @dataclass
 class PathParams:
@@ -67,9 +63,9 @@ class LogParams:
 
 @dataclass
 class VisualisationParams:
-    draw_path: bool = False
-    draw_frontier_centroid: bool = False
-    draw_frontier_points: bool = False
+    draw_path: bool = True
+    draw_frontier_centroid: bool = True
+    draw_frontier_points: bool = True
 
 @dataclass  # Relative to grids.py
 class GridParams:

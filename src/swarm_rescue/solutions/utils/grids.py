@@ -301,7 +301,7 @@ class OccupancyGrid(Grid):
 
             if path:
                 path_simplified = self.simplify_path(path, MAP_inflated) or [start_cell]
-                return [self._conv_grid_to_world(x, y) for x, y in path_simplified]
+                return [np.array(self._conv_grid_to_world(x, y)) for x, y in path_simplified]
         
         return None
 

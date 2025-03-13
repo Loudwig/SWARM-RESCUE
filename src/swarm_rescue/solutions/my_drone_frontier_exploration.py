@@ -94,7 +94,7 @@ class MyDroneFrontex(DroneAbstract):
         self.initial_group_barycenter = None
 
             # WALL FOLLOWING
-        self.found_wall = False
+        self.found_obstacle = False
         self.distance_nearest_obstacle = 0.0
         self.angle_nearest_obstacle = 0.0
 
@@ -109,7 +109,16 @@ class MyDroneFrontex(DroneAbstract):
 
         # PATH FOLLOWING
         self.index_current_waypoint = 0
-        self.inital_point_path = np.array([0.0,0.0])
+        self.previous_waypoint_position = np.array([0.0,0.0])
+        self.next_waypoint_position = np.array([0.0,0.0])
+
+        self.epsilon_angle = 0.0
+        self.epsilon_lateral = 0.0
+        self.epsilon_forward = 0.0
+        self.history_epsilon_angle = deque([0.0] * 10, maxlen=10)
+        self.history_epsilon_lateral = deque([0.0] * 10, maxlen=10)
+        self.history_epsilon_forward = deque([0.0] * 10, maxlen=10)
+
         self.finished_path = True
         self.path = []
         self.history_path_searching = deque([False]*10, maxlen=10)
@@ -130,6 +139,21 @@ class MyDroneFrontex(DroneAbstract):
         self.next_frontier_target_pos = None
         self.finished_path = True
         self.path = []
+
+    def set_new_path(self, start_pos, target_pos, max_inflation):
+        self.path = self.grid.compute_safest_path(start_pos, target_pos, max_inflation)
+
+        if self.path is not None:
+            self.index_current_waypoint = 0
+            self.previous_waypoint_position = self.path[0]
+            if len(self.path) > 0:
+                self.next_waypoint_position = self.path[1]
+            else:
+                self.next_waypoint_position = self.path[0]
+            
+            self.finished_path = False
+            
+        self.history_path_searching[-1] = True
     
     def reset_received_infos(self):
         """
@@ -210,6 +234,12 @@ class MyDroneFrontex(DroneAbstract):
             return 0.1
         else :
             return 0.5
+        
+    def clip_command(self, command):
+        command["forward"] = np.clip(command["forward"], -1.0, 1.0)
+        command["lateral"] = np.clip(command["lateral"], -1.0, 1.0)
+        command["rotation"] = np.clip(command["rotation"], -1.0, 1.0)
+        return command
     
     def control(self):
         if not self.is_killed() :
@@ -242,7 +272,6 @@ class MyDroneFrontex(DroneAbstract):
                 self.State.WAITING_DEPARTURE: self.handle_waiting_departure,
                 self.State.SEARCHING_WALL: self.handle_searching_wall,
                 self.State.FOLLOWING_WALL: self.handle_following_wall,
-                self.State.FOLLOWING_WALL: self.handle_following_wall,
                 self.State.GRASPING_WOUNDED: self.handle_grasping_wounded,
                 self.State.SEARCHING_RESCUE_CENTER: self.handle_searching_rescue_center,
                 self.State.GOING_RESCUE_CENTER: self.handle_going_rescue_center,
@@ -256,11 +285,23 @@ class MyDroneFrontex(DroneAbstract):
             if self.state == self.State.STOP:
                 pass
 
-            return state_handlers.get(self.state, self.handle_unknown_state)()
+            command = state_handlers.get(self.state, self.handle_unknown_state)()
+            command["grasper"] = int(self.need_to_grasp())
+            return command
         
         else : 
             # Drone in KillZone. Or at least no lidar available
             return {"forward": 0.0, "lateral": 0.0, "rotation": 0.0, "grasper": 0}
+    
+    def need_to_grasp(self):
+        if self.state in {self.State.GRASPING_WOUNDED,
+                          self.State.GRASPING_FOLLOWING_WALL,
+                          self.State.SEARCHING_RESCUE_CENTER,
+                          self.State.GOING_RESCUE_CENTER}:
+            return True
+        
+        else:
+            return False
 
     def handle_waiting(self):
         self.reset_exploration_path_infos()
@@ -297,26 +338,21 @@ class MyDroneFrontex(DroneAbstract):
         return {"forward": 0.5, "lateral": 0.0, "rotation": 0.0, "grasper": 0}
 
     def handle_following_wall(self):
-        self.reset_exploration_path_infos()
-        epsilon_angle = normalize_angle(self.angle_nearest_obstacle - np.pi/2)     # Parallel to the wall
-        epsilon_distance = self.distance_nearest_obstacle - WallFollowingParams.dist_to_stay
+        self.epsilon_angle = normalize_angle(self.angle_nearest_obstacle - np.pi/2)     # Parallel to the wall
+        self.epsilon_lateral = self.distance_nearest_obstacle - WallFollowingParams.dist_to_stay
 
-        command = {"forward": WallFollowingParams.speed_following_wall, "lateral": 0.0, "rotation": 0.0, "grasper": 0}
-        command = self.pid_controller(command, epsilon_angle, PIDParams.Kp_angle, PIDParams.Kd_angle, "rotation")
-        command = self.pid_controller(command, epsilon_distance, PIDParams.Kp_distance, PIDParams.Kd_distance, "lateral")
-
-        return command
+        return self.pid_controller( imposed_command_forward = WallFollowingParams.speed_following_wall )
 
     def handle_grasping_wounded(self):
-        self.reset_exploration_path_infos()
-        command = {"forward": GraspingParams.grasping_speed, "lateral": 0.0, "rotation": 0.0, "grasper": 1 if self.score_wounded<GraspingParams.grasping_dist else 0}
-        return self.pid_controller(command, normalize_angle(self.epsilon_wounded), PIDParams.Kp_angle, PIDParams.Kd_angle,"rotation")
+        self.epsilon_angle = normalize_angle(self.epsilon_wounded)
+
+        return self.pid_controller( imposed_command_forward = GraspingParams.grasping_speed )
 
     def handle_searching_rescue_center(self):
         if self.previous_state is not self.State.SEARCHING_RESCUE_CENTER:
             self.plan_path_to_rescue_center()
 
-        command = self.follow_path(self.path, found_and_near_wounded=True)
+        command = self.follow_path()
         return command
 
     def plan_path_to_rescue_center(self):
@@ -325,10 +361,7 @@ class MyDroneFrontex(DroneAbstract):
         max_inflation = PathParams.max_inflation_grasping if bool(self.base.grasper.grasped_entities) \
                                                             else PathParams.max_inflation_obstacle
         if bool(self.estimated_pose.gps):
-            self.path = self.grid.compute_safest_path(start_pos, target_pos, max_inflation)
-            self.index_current_waypoint = 0
-            self.history_path_searching.pop()
-            self.history_path_searching.append(True)
+            self.set_new_path(start_pos, target_pos, max_inflation)
         else:
             self.path = None
 
@@ -337,26 +370,20 @@ class MyDroneFrontex(DroneAbstract):
         command["grasper"] = 1
         return command
 
-    def handle_going_rescue_center(self, is_very_near):
-        epsilon_rescue_center = normalize_angle(epsilon_rescue_center)
-        command = {"forward":  1.0, "lateral": 0.0, "rotation": 0.0, "grasper": 1}
-        command = self.pid_controller(command, epsilon_rescue_center, PIDParams.Kp_angle, PIDParams.Kd_angle,"rotation")
+    def handle_going_rescue_center(self):
+        self.epsilon_angle = normalize_angle(self.best_angle_rescue_center)
 
-        if is_very_near:
-            command["rotation"] = 1.0
-
-        return command
+        return self.pid_controller()
 
     def handle_exploring_frontiers(self):
         if self.finished_path:
             self.plan_path_to_frontier()
-            self.finished_path = False
 
         if self.explored_all_frontiers or self.path is None:
             return self.handle_waiting()
 
         else:
-            return self.follow_path(self.path, found_and_near_wounded=False)
+            return self.follow_path()
 
     def assign_frontier_cluster(self):
         """
@@ -462,12 +489,10 @@ class MyDroneFrontex(DroneAbstract):
 
             start_pos = self.estimated_pose.position
             target_pos = self.next_frontier_target_pos
-
             max_inflation = PathParams.max_inflation_obstacle
-            self.path = self.grid.compute_safest_path(start_pos, target_pos, max_inflation)
 
-            self.history_path_searching[-1] = True
-            self.index_current_waypoint = 0
+            self.set_new_path(start_pos, target_pos, max_inflation)
+
         else:
             self.explored_all_frontiers = True
     
@@ -543,86 +568,101 @@ class MyDroneFrontex(DroneAbstract):
         if size != 0:
             self.angle_nearest_obstacle = ray_angles[np.argmin(lidar_values)]
 
-        near_obstacle = False
-        if self.distance_nearest_obstacle < WallFollowingParams.dmax:
-            near_obstacle = True
+        self.distance_nearest_obstacle = np.min(ray_angles)
+        self.found_obstacle = self.distance_nearest_obstacle <= WallFollowingParams.dmax
+    
+    def pid(self, epsilon, deriv_epsilon, Kp, Kd):
+        return Kp*epsilon + Kd*deriv_epsilon
 
-        return (near_obstacle)
+    def pid_controller(self, imposed_command_angle=None, imposed_command_forward=None, imposed_command_lateral=None):
+        """
+        Uses class attributes (self.epsilon_*) to compute the PID control for the drone.
+        """
+        command = {"forward": 0.0, "lateral": 0.0, "rotation": 0.0}
 
-    def pid_controller(self,command,epsilon,Kp,Kd,mode,command_slow = 0.8,grasping=False):
-        if mode == "rotation":
-            epsilon = normalize_angle(epsilon)
-            deriv_epsilon = normalize_angle(self.odometer_values()[2])
-        elif mode == "lateral":
-            deriv_epsilon = -np.sin(self.odometer_values()[1])*self.odometer_values()[0] # vitesse latérale
-        elif mode == "forward" : 
-            deriv_epsilon = epsilon - self.prev_diff_position
-            self.prev_diff_position = epsilon
-            
-        else : 
-            raise ValueError("Mode not found")
-        
-        correction_proportionnelle = Kp * epsilon
-        correction_derivee = Kd * deriv_epsilon
-        correction = correction_proportionnelle + correction_derivee
+        # Rotation
+        deriv_epsilon = normalize_angle(self.odometer_values()[2])
+        self.history_epsilon_angle.append(self.epsilon_angle)
+        Kp = PIDParams.Kp_angle
+        Kd = PIDParams.Kd_angle
+        command["rotation"] = self.pid(self.epsilon_angle, deriv_epsilon, Kp, Kd)
 
-        if grasping and mode == "forward":
-            correction = 3*correction
+        # Lateral
+        deriv_epsilon = -np.sin(self.odometer_values()[1])*self.odometer_values()[0] # vitesse latérale
+        self.history_epsilon_lateral.append(self.epsilon_lateral)
+        Kp = PIDParams.Kp_lateral
+        Kd = PIDParams.Kd_lateral
+        command["lateral"] = self.pid(self.epsilon_lateral, deriv_epsilon, Kp, Kd)
 
-        command[mode] = correction
-        command[mode] = min( max(-1,correction) , 1 )
+        # Forward
+        deriv_epsilon = self.epsilon_forward - self.history_epsilon_forward[-1]
+        self.history_epsilon_forward.append(self.epsilon_forward)
+        Kp = PIDParams.Kp_forward
+        Kd = PIDParams.Kd_forward
+        command["forward"] = self.pid(self.epsilon_forward, deriv_epsilon, Kp, Kd)
 
+        # Forward and lateral control are efficient only if the angle error is small
+        if abs(self.epsilon_angle) >= 0.2:
+            command["forward"] = 0.0
+            command["lateral"] = 0.0
 
-        if mode == "rotation" : 
-            if correction > command_slow :
-                command["forward"] = WallFollowingParams.speed_turning
+        if imposed_command_angle != None:
+            command["angle"] = imposed_command_angle
+        if imposed_command_forward != None:
+            command["forward"] = imposed_command_forward
+        if imposed_command_lateral != None:
+            command["lateral"] = imposed_command_lateral
+
+        self.clip_command(command)
 
         return command
     
     def is_near_waypoint(self,waypoint):
         distance_to_waypoint = np.linalg.norm(waypoint - self.estimated_pose.position)
-        if distance_to_waypoint < PathParams.distance_close_waypoint:
+        if distance_to_waypoint <= PathParams.distance_close_waypoint:
             return True
         return False
 
-    def follow_path(self,path,found_and_near_wounded):
-        if path is None :
-            self.finished_path = True
-            self.index_current_waypoint = 0
-            self.path = []
-            return 
-        else : 
-            if self.is_near_waypoint(path[self.index_current_waypoint]):
+    def is_stabilized(self):
+        return np.mean([abs(error) for error in self.history_epsilon_forward]) <= 30.0
+
+    def follow_path(self):
+        # Progression in the path
+        if self.path is not None:
+            if self.is_near_waypoint(self.next_waypoint_position) and self.is_stabilized:
                 self.index_current_waypoint += 1
-                if self.index_current_waypoint >= len(path):
+                if self.index_current_waypoint >= len(self.path):
                     self.finished_path = True
-                    self.index_current_waypoint = 0
-                    self.path = []
-                    return
-            
-            return self.go_to_waypoint(path[self.index_current_waypoint][0],path[self.index_current_waypoint][1],found_and_near_wounded)
+                    return self.handle_waiting()
+                else:
+                    self.previous_waypoint_position = self.next_waypoint_position
+                    self.next_waypoint_position = self.path[self.index_current_waypoint]
+        
+        return self.go_to_next_waypoint()
 
-    def go_to_waypoint(self,x,y,found_and_near_wounded):
-        dx = x - self.estimated_pose.position[0]
-        dy = y - self.estimated_pose.position[1]
-        epsilon = math.atan2(dy,dx) - self.estimated_pose.orientation
-        epsilon = normalize_angle(epsilon)
-        command_path = self.pid_controller({"forward": 0,"lateral": 0.0,"rotation": 0.0,"grasper": 1 if found_and_near_wounded else 0},epsilon,PIDParams.Kp_angle_1,PIDParams.Kd_angle_1,"rotation",0.5)
+    def go_to_next_waypoint(self):
+        current_segment = self.next_waypoint_position - self.previous_waypoint_position
+        error_vector = self.next_waypoint_position - self.estimated_pose.position
 
-        if self.index_current_waypoint == 0:
-            x_previous_waypoint,y_previous_waypoint = self.inital_point_path
-        else : 
-            x_previous_waypoint,y_previous_waypoint = self.path[self.index_current_waypoint-1][0],self.path[self.index_current_waypoint-1][1]
+        # ANGLE CONTROL
+        epsilon_angle = np.arctan2(current_segment[1], current_segment[0]) - self.estimated_pose.orientation
+        self.epsilon_angle = normalize_angle(epsilon_angle)
 
-        epsilon_distance = compute_relative_distance_to_droite(x_previous_waypoint,y_previous_waypoint,x,y,self.estimated_pose.position[0],self.estimated_pose.position[1])
-        # epsilon distance needs to be signed (positive if the angle relative to the theoritical path is positive)
-        command_path = self.pid_controller(command_path,epsilon_distance,PIDParams.Kp_distance_1,PIDParams.Kd_distance_1,"lateral",0.5)
+        # LATERAL CONTROL
+        if np.linalg.norm(current_segment) != 0.0:
+            epsilon_lateral = np.cross(current_segment, error_vector) / np.linalg.norm(current_segment)
+            self.epsilon_lateral = epsilon_lateral
+        else:
+            self.epsilon_lateral = 0.0
 
-        diff_position = math.dist(np.array([x,y]), self.estimated_pose.position)
+        # FORWARD CONTROL
+        if np.linalg.norm(current_segment) != 0.0:
+            epsilon_forward = np.dot(current_segment, error_vector) / np.linalg.norm(current_segment)
+            self.epsilon_forward = epsilon_forward
+        else:
+            self.epsilon_forward = 0.0
 
-        command_path = self.pid_controller(command_path,diff_position,PIDParams.Kp_distance_2,PIDParams.Kd_distance_2,"forward",1,found_and_near_wounded)
-
-        return command_path
+        return self.pid_controller()
 
     def must_return_area(self):
         if not(bool(self.estimated_pose.gps)):
@@ -644,8 +684,8 @@ class MyDroneFrontex(DroneAbstract):
             "try_searching_rescue_center" : self.elapsed_timestep%200==0 and bool(self.estimated_pose.gps),
             "gps": bool(self.estimated_pose.gps),
             "no_gps" : not(bool(self.estimated_pose.gps)),
-            "found_wall": self.found_wall,
-            "lost_wall": not self.found_wall,
+            "found_obstacle": self.found_obstacle,
+            "lost_wall": not self.found_obstacle,
             "found_wounded": self.found_wounded,
             "must_return_grasping_available": must_return and (not bool(self.base.grasper.grasped_entities)) and self.found_wounded,
             "holding_wounded": bool(self.base.grasper.grasped_entities),
@@ -713,7 +753,7 @@ class MyDroneFrontex(DroneAbstract):
                 "must_return": self.State.SEARCHING_RESCUE_CENTER,
                 "found_wounded": self.State.GRASPING_WOUNDED,
                 "health_decreasing": self.State.WAITING,
-                "found_wall": self.State.FOLLOWING_WALL,
+                "found_obstacle": self.State.FOLLOWING_WALL,
                 "is_near_rescuing_drone": self.State.WAITING
             },
             self.State.FOLLOWING_WALL: {
@@ -778,8 +818,6 @@ class MyDroneFrontex(DroneAbstract):
     def draw_top_layer(self):
         if VisualisationParams.draw_path:
             self.draw_path(self.path)
-
-
 
         if self.state == self.State.EXPLORING_FRONTIERS:
             
