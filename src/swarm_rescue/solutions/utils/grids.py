@@ -34,8 +34,10 @@ class OccupancyGrid(Grid):
             return np.mean(self.cells, axis=0).astype(int)
 
 
-        def point_closest_to_centroid(self):
-            "compute the cell closest to the centroid"
+        def cell_closest_to_centroid(self):
+            """
+            Compute the cell closest to the centroid of the frontier among cells of the frontier.
+            """
             if self.cells.size == 0:
                 return None
             return self.cells[np.argmin(np.linalg.norm(self.cells - self.centroid(), axis=1))]
@@ -89,7 +91,7 @@ class OccupancyGrid(Grid):
         ternary_map = np.zeros_like(self.grid, dtype=int)
         ternary_map[self.grid >= OBSTACLE_THRESHOLD] = self.OBSTACLE
         ternary_map[self.grid <= FREE_THRESHOLD] = self.FREE
-        ternary_map[ not(self.grid >= OBSTACLE_THRESHOLD or self.grid <= FREE_THRESHOLD) ] = self.UNDISCOVERED
+        ternary_map[(self.grid < OBSTACLE_THRESHOLD) & (self.grid > FREE_THRESHOLD)] = self.UNDISCOVERED
         return ternary_map
 
     def to_binary_map(self):
@@ -272,14 +274,23 @@ class OccupancyGrid(Grid):
         
         closest_frontier, closest_centroid, _ = min(frontiers_with_size, key=interest_measure, default=(None, None))
         return (closest_frontier, closest_centroid)
+    
+    def pos_closest_to_centroid(self, frontier: Frontier):
+        """
+        Returns the position of the frontier closest to its centroid.
+        """
+        return self._conv_grid_to_world(*frontier.cell_closest_to_centroid())
 
-    def compute_safest_path(self, start_cell, target_cell, max_inflation):
+    def compute_safest_path(self, start_pos, target_pos, max_inflation):
         """
         Returns the path, if it exists, that joins drone's position to target_cell
         while approaching the least possible any wall
+        start_pos, target_pos : WORLD COORDINATES
         start_cell, target_cell : GRID COORDINATES
         """
         MAP = self.to_ternary_map()
+
+        start_cell, target_cell = self._conv_world_to_grid(*start_pos), self._conv_world_to_grid(*target_pos)
 
         for inflation in range(max_inflation, 0, -1):   # Decreasing inflation to find the safest path
             MAP_inflated = inflate_obstacles(MAP, inflation)
