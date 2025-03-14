@@ -33,7 +33,6 @@ class OccupancyGrid(Grid):
                 return None
             return np.mean(self.cells, axis=0).astype(int)
 
-
         def cell_closest_to_centroid(self):
             """
             Compute the cell closest to the centroid of the frontier among cells of the frontier.
@@ -81,9 +80,9 @@ class OccupancyGrid(Grid):
     def to_ternary_map(self):
         """
         Convert the probabilistic occupancy grid into a ternary grid.
-        Cells with value >= OBSTACLE_THRESHOLD are considered obstacles.
-        Cells with value <= FREE_THRESHOLD are considered free.
-        Cells with value = 0 are considered undiscovered
+        Cells with values >= OBSTACLE_THRESHOLD are considered obstacles.
+        Cells with values <= FREE_THRESHOLD are considered free.
+        Cells with other values are considered undiscovered
         """
         OBSTACLE_THRESHOLD = GridParams.OBSTACLE_THRESHOLD
         FREE_THRESHOLD = GridParams.FREE_THRESHOLD
@@ -97,17 +96,14 @@ class OccupancyGrid(Grid):
     def to_binary_map(self):
         """
         Convert the probabilistic occupancy grid into a binary grid.
-        Cells with value > OBSTACLE_THRESHOLD are considered obstacles.
-        Cells with value < FREE_THRESHOLD are considered free.
+        Cells with values <= FREE_THRESHOLD are considered free.
+        Other cells are considered obstacles.
         """
-        OBSTACLE_THRESHOLD = GridParams.OBSTACLE_THRESHOLD
         FREE_THRESHOLD = GridParams.FREE_THRESHOLD
 
         binary_map = np.zeros_like(self.grid, dtype=int)
-        binary_map[self.grid >= OBSTACLE_THRESHOLD] = self.OBSTACLE
         binary_map[self.grid <= FREE_THRESHOLD] = self.FREE
-        # Binary map : undiscovered are considered obstacles
-        binary_map[ not(self.grid >= OBSTACLE_THRESHOLD or self.grid <= FREE_THRESHOLD) ] = self.OBSTACLE
+        binary_map[self.grid > FREE_THRESHOLD] = self.OBSTACLE
         return binary_map
     
     def update(self, pose: Pose):

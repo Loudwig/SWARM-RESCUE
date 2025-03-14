@@ -576,8 +576,8 @@ class MyDroneFrontex(DroneAbstract):
         self.distance_nearest_obstacle = np.min(lidar_values)
         self.found_obstacle = self.distance_nearest_obstacle <= WallFollowingParams.dmax
     
-    def pid(self, epsilon, deriv_epsilon, Kp, Kd):
-        return Kp*epsilon + Kd*deriv_epsilon
+    def pid(self, epsilon, deriv_epsilon, integ_epsilon, Kp, Kd, Ki):
+        return Kp*epsilon + Kd*deriv_epsilon + Ki*integ_epsilon
 
     def pid_controller(self, imposed_command_angle=None, imposed_command_forward=None, imposed_command_lateral=None):
         """
@@ -587,24 +587,33 @@ class MyDroneFrontex(DroneAbstract):
 
         # Rotation
         deriv_epsilon = normalize_angle(self.odometer_values()[2])
+        integ_epsilon = np.mean(self.history_epsilon_angle)
         self.history_epsilon_angle.append(self.epsilon_angle)
         Kp = PIDParams.Kp_angle
         Kd = PIDParams.Kd_angle
-        command["rotation"] = self.pid(self.epsilon_angle, deriv_epsilon, Kp, Kd)
+        Ki = PIDParams.Ki_angle
+        command["rotation"] = self.pid(self.epsilon_angle, deriv_epsilon, integ_epsilon, Kp, Kd, Ki)
+        if self.state == self.State.FOLLOWING_WALL:
+            print("epsilon",self.epsilon_angle)
+            print("command",command["rotation"])
 
         # Lateral
-        deriv_epsilon = -np.sin(self.odometer_values()[1])*self.odometer_values()[0] # vitesse latérale
+        deriv_epsilon = -np.sin(self.odometer_values()[1])*self.odometer_values()[0] # lateral speed
+        integ_epsilon = np.mean(self.history_epsilon_lateral)
         self.history_epsilon_lateral.append(self.epsilon_lateral)
         Kp = PIDParams.Kp_lateral
         Kd = PIDParams.Kd_lateral
-        command["lateral"] = self.pid(self.epsilon_lateral, deriv_epsilon, Kp, Kd)
+        Ki = PIDParams.Ki_lateral
+        command["lateral"] = self.pid(self.epsilon_lateral, deriv_epsilon, integ_epsilon, Kp, Kd, Ki)
 
         # Forward
         deriv_epsilon = self.epsilon_forward - self.history_epsilon_forward[-1]
+        integ_epsilon = np.mean(self.history_epsilon_forward)
         self.history_epsilon_forward.append(self.epsilon_forward)
         Kp = PIDParams.Kp_forward
         Kd = PIDParams.Kd_forward
-        command["forward"] = self.pid(self.epsilon_forward, deriv_epsilon, Kp, Kd)
+        Ki = PIDParams.Ki_forward
+        command["forward"] = self.pid(self.epsilon_forward, deriv_epsilon, integ_epsilon, Kp, Kd, Ki)
 
         # Forward and lateral control are efficient only if the angle error is small
         if abs(self.epsilon_angle) >= 0.2:

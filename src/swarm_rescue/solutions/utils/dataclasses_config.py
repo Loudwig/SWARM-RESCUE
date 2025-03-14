@@ -46,7 +46,7 @@ class PIDParams:
 
     Kp_forward : float = 1.6
     Kd_forward: float = 11.0
-    Ki_forward: float = 0
+    Ki_forward: float = 0.0
 
 @dataclass
 class PathParams:
