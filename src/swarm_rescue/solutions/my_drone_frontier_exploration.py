@@ -349,7 +349,7 @@ class MyDroneFrontex(DroneAbstract):
         return self.pid_controller( imposed_command_forward = WallFollowingParams.speed_following_wall )
 
     def handle_grasping_wounded(self):
-        self.epsilon_angle = normalize_angle(self.epsilon_wounded)
+        self.epsilon_angle = normalize_angle(self.best_angle_wounded)
 
         return self.pid_controller( imposed_command_forward = GraspingParams.grasping_speed )
 
@@ -573,7 +573,7 @@ class MyDroneFrontex(DroneAbstract):
         if size != 0:
             self.angle_nearest_obstacle = ray_angles[np.argmin(lidar_values)]
 
-        self.distance_nearest_obstacle = np.min(ray_angles)
+        self.distance_nearest_obstacle = np.min(lidar_values)
         self.found_obstacle = self.distance_nearest_obstacle <= WallFollowingParams.dmax
     
     def pid(self, epsilon, deriv_epsilon, Kp, Kd):
@@ -810,6 +810,8 @@ class MyDroneFrontex(DroneAbstract):
         arcade.draw_circle_filled(point[0], point[1], 5, color)
 
     def draw_path(self, path):
+        if path is None:
+            return
         length = len(path)
         pt2 = None
         for ind_pt in range(length):
