@@ -20,8 +20,8 @@ from solutions.utils.messages import DroneMessage
 from solutions.utils.grids import *
 from solutions.utils.dataclasses_config import *
 
-from swarm_rescue.solutions.utils.astar import can_go_straight
-from swarm_rescue.solutions.utils.dataclasses_config import WallFollowingParams, WaitingStateParams
+from solutions.utils.astar import can_go_straight
+from solutions.utils.dataclasses_config import WallFollowingParams, WaitingStateParams
 
 
 class MyDroneFrontex(DroneAbstract):
