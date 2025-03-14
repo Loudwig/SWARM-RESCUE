@@ -170,6 +170,11 @@ class MyDroneFrontex(DroneAbstract):
         self.best_score = 0.0
         self.found_rescue_center = False
         self.is_near_rescue_center = False
+
+    def reset_pid_history(self):
+        self.history_epsilon_angle = deque([0.0] * 10, maxlen=10)
+        self.history_epsilon_lateral = deque([0.0] * 10, maxlen=10)
+        self.history_epsilon_forward = deque([0.0] * 10, maxlen=10)
     
     def is_killed(self):
         return self.lidar().get_sensor_values() is None or self._drone_health<=0
@@ -777,6 +782,8 @@ class MyDroneFrontex(DroneAbstract):
                     self.step_waiting_count = 0
                 if self.state == self.State.DEADLOCK:
                     self.step_deadlock_count = 0
+
+                self.reset_pid_history()
     
     def mapping(self, display = False):
         
