@@ -9,7 +9,7 @@ from spg_overlay.entities.drone_distance_sensors import DroneSemanticSensor
 from solutions.utils.dataclasses_config import *
 
 from sklearn.cluster import DBSCAN
-
+import pyastar2d
 
 class OccupancyGrid(Grid):
     """Self updating occupancy grid"""
@@ -284,22 +284,12 @@ class OccupancyGrid(Grid):
         start_pos, target_pos : WORLD COORDINATES
         start_cell, target_cell : GRID COORDINATES
         """
-        MAP = self.to_ternary_map()
+        MAP = np.float32(self.to_binary_map() * 1000*1000 + 1.0)
 
         start_cell, target_cell = self._conv_world_to_grid(*start_pos), self._conv_world_to_grid(*target_pos)
 
-        for inflation in range(max_inflation, 0, -1):   # Decreasing inflation to find the safest path
-            MAP_inflated = inflate_obstacles(MAP, inflation)
-            start_x, start_y = next_point_free(MAP_inflated, *start_cell, max_inflation - inflation)
-            end_x, end_y = next_point_free(MAP_inflated, *target_cell, max_inflation - inflation)
-
-            path = a_star_search(MAP_inflated, (start_x, start_y), (end_x, end_y))
-
-            if path:
-                path_simplified = self.simplify_path(path, MAP_inflated) or [start_cell]
-                return [np.array(self._conv_grid_to_world(x, y)) for x, y in path_simplified]
-        
-        return None
+        grid_path = pyastar2d.astar_path(MAP, start_cell, target_cell, allow_diagonal=False)
+        return [np.array(self._conv_grid_to_world(*cell)) for cell in grid_path]
 
     def path_distance(self, path) :
         if path is None:
